@@ -1,0 +1,552 @@
+'use client';
+
+import { useState, useEffect, useRef } from 'react';
+import { useRouter } from 'next/navigation';
+import { supabase } from '@/lib/supabase';
+import { 
+  MoreVertical, 
+  MessageCircle, 
+  Share2, 
+  Download,
+  AlertCircle,
+  Loader2,
+  Flag,
+  Play
+} from 'lucide-react';
+import Image from 'next/image';
+
+// --- INTERFACCE ---
+interface Post {
+  id: string;
+  video_url: string;
+  prompt: string;
+  created_at: string;
+  user_id: string;
+  profile: {
+    id: string;
+    full_name: string;
+    username: string;
+    avatar_url: string | null;
+  };
+  likes_count: number;
+  has_user_liked: boolean;
+}
+
+/**
+ * FEED CINEMATOGRAFICO - LAYOUT A BLOCCHI/CARD
+ * Design compatto con icone laterali e info dentro il video
+ */
+export default function FeedPage() {
+  const router = useRouter();
+  const [activeTab, setActiveTab] = useState<'film' | 'seguiti'>('film');
+  const [posts, setPosts] = useState<Post[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isFetchingMore, setIsFetchingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  
+  // Stati UI
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const [pausedVideos, setPausedVideos] = useState<Set<string>>(new Set());
+  const [confettiActive, setConfettiActive] = useState<string | null>(null);
+
+  // Refs per video, intersection observer e paginazione
+  const videoRefs = useRef<{ [key: string]: HTMLVideoElement | null }>({});
+  const observerRef = useRef<IntersectionObserver | null>(null);
+
+  // --- FUNZIONE CARICAMENTO DATI ---
+  const fetchVideos = async (isInitial = false) => {
+    if (isFetchingMore || (!hasMore && !isInitial)) return;
+    
+    setIsFetchingMore(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const userId = session?.user?.id || null;
+      setCurrentUserId(userId);
+
+      const start = isInitial ? 0 : posts.length;
+      const end = start + 2; 
+
+      let query = supabase
+        .from('public_videos')
+        .select(`
+          id,
+          video_url,
+          caption,
+          created_at,
+          user_id,
+          likes_count,
+          profiles:user_id (
+            id,
+            full_name,
+            username,
+            avatar_url
+          )
+        `)
+        .order('created_at', { ascending: false })
+        .range(start, end);
+
+      const { data: videosData, error } = await query;
+
+      if (error) {
+        console.error('❌ Errore caricamento feed:', error);
+        setIsLoading(false);
+        setIsFetchingMore(false);
+        return;
+      }
+
+      if (!videosData || videosData.length < 3) {
+        setHasMore(false);
+      }
+
+      const transformedPosts: Post[] = await Promise.all(
+        (videosData || []).map(async (video: any) => {
+          let hasUserLiked = false;
+          if (userId) {
+            const { data: likeData } = await supabase
+              .from('likes')
+              .select('id')
+              .eq('film_id', video.id)
+              .eq('user_id', userId)
+              .maybeSingle();
+            
+            hasUserLiked = !!likeData;
+          }
+
+          return {
+            id: video.id,
+            video_url: video.video_url,
+            prompt: video.caption || '',
+            created_at: video.created_at,
+            user_id: video.user_id,
+            profile: video.profiles,
+            likes_count: video.likes_count || 0,
+            has_user_liked: hasUserLiked
+          };
+        })
+      );
+
+      setPosts(prev => isInitial ? transformedPosts : [...prev, ...transformedPosts]);
+
+    } catch (err) {
+      console.error('❌ Errore fatale caricamento feed:', err);
+    } finally {
+      setIsLoading(false);
+      setIsFetchingMore(false);
+    }
+  };
+
+  // Caricamento iniziale
+  useEffect(() => {
+    setPosts([]);
+    setHasMore(true);
+    fetchVideos(true);
+  }, [activeTab]);
+
+  // --- INTERSECTION OBSERVER PER AUTOPLAY E INFINITE SCROLL ---
+  useEffect(() => {
+    observerRef.current = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          const video = entry.target as HTMLVideoElement;
+          const postId = video.getAttribute('data-id');
+          
+          if (entry.isIntersecting) {
+            if (postId && !pausedVideos.has(postId)) {
+              video.play().catch((e) => console.log("Autoplay richiede interazione"));
+            }
+            
+            const currentIndex = posts.findIndex(p => p.id === postId);
+            if (currentIndex >= posts.length - 2 && hasMore && !isFetchingMore) {
+              fetchVideos();
+            }
+          } else {
+            video.pause();
+          }
+        });
+      },
+      { threshold: 0.6 }
+    );
+
+    Object.values(videoRefs.current).forEach((video) => {
+      if (video) observerRef.current?.observe(video);
+    });
+
+    return () => {
+      observerRef.current?.disconnect();
+    };
+  }, [posts, hasMore, isFetchingMore, pausedVideos]);
+
+  // --- GESTIONE LIKE/OSCAR (Sincronizzato con DB) ---
+  const handleLikeToggle = async (postId: string) => {
+    if (!currentUserId) {
+      alert('Devi effettuare il login per mettere like!');
+      router.push('/auth');
+      return;
+    }
+
+    const post = posts.find((p) => p.id === postId);
+    if (!post) return;
+
+    const wasLiked = post.has_user_liked;
+    const newCount = wasLiked ? post.likes_count - 1 : post.likes_count + 1;
+    
+    if (!wasLiked) {
+      setConfettiActive(postId);
+      setTimeout(() => setConfettiActive(null), 2200);
+    }
+    
+    // UI Update immediato (Optimistic Update)
+    setPosts((prev) =>
+      prev.map((p) =>
+        p.id === postId
+          ? { ...p, has_user_liked: !wasLiked, likes_count: Math.max(0, newCount) }
+          : p
+      )
+    );
+
+    try {
+      if (wasLiked) {
+        // Rimuovi like e decrementa contatore
+        await supabase.from('likes').delete().eq('film_id', postId).eq('user_id', currentUserId);
+        await supabase.rpc('decrement_likes', { row_id: postId });
+      } else {
+        // Aggiungi like e incrementa contatore
+        await supabase.from('likes').insert({ film_id: postId, user_id: currentUserId });
+        await supabase.rpc('increment_likes', { row_id: postId });
+      }
+    } catch (error) {
+      console.error('❌ Errore database like:', error);
+      // Rollback se fallisce
+      setPosts((prev) =>
+        prev.map((p) =>
+          p.id === postId
+            ? { ...p, has_user_liked: wasLiked, likes_count: post.likes_count }
+            : p
+        )
+      );
+    }
+  };
+
+  // --- TOGGLE PLAY/PAUSE ---
+  const handleVideoClick = (postId: string) => {
+    const video = videoRefs.current[postId];
+    if (!video) return;
+
+    if (video.paused) {
+      video.play();
+      setPausedVideos((prev) => {
+        const newSet = new Set(prev);
+        newSet.delete(postId);
+        return newSet;
+      });
+    } else {
+      video.pause();
+      setPausedVideos((prev) => {
+        const newSet = new Set(prev);
+        newSet.add(postId);
+        return newSet;
+      });
+    }
+  };
+
+  // --- CONDIVIDI VIDEO ---
+  const handleShare = async (post: Post) => {
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: `Film di ${post.profile?.full_name || 'Cinema Scuola'}`,
+          text: post.prompt,
+          url: post.video_url
+        });
+      } catch (err) {}
+    } else {
+      await navigator.clipboard.writeText(post.video_url);
+      alert('Link copiato negli appunti!');
+    }
+  };
+
+  // --- DOWNLOAD VIDEO ---
+  const handleDownload = async (post: Post) => {
+    try {
+      const response = await fetch(post.video_url);
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `film_${post.profile?.username || 'video'}_${Date.now()}.mp4`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      window.open(post.video_url, '_blank');
+    }
+  };
+
+  // --- RENDER LOADING ---
+  if (isLoading) {
+    return (
+      <div className="flex flex-col items-center justify-center h-screen bg-black">
+        <Loader2 className="w-12 h-12 text-yellow-400 animate-spin mb-4" />
+        <p className="text-zinc-500 text-sm font-semibold">Caricamento Feed...</p>
+      </div>
+    );
+  }
+
+  return (
+    <main className="fixed inset-0 bg-[#000000]">
+      {/* HEADER CON TAB */}
+      <header className="fixed top-0 left-0 right-0 z-50 bg-black/80 backdrop-blur-xl border-b border-zinc-900">
+        <div className="max-w-md mx-auto flex items-center justify-center gap-8 px-4 py-4">
+          <button
+            onClick={() => setActiveTab('film')}
+            className={`relative pb-2 transition-all duration-300 ${
+              activeTab === 'film'
+                ? 'text-white text-lg font-black'
+                : 'text-zinc-600 text-base font-bold'
+            }`}
+          >
+            Film
+            {activeTab === 'film' && (
+              <div className="absolute bottom-0 left-0 right-0 h-[3px] bg-[#D4AF37] rounded-full"></div>
+            )}
+          </button>
+          
+          <button
+            onClick={() => setActiveTab('seguiti')}
+            className={`relative pb-2 transition-all duration-300 ${
+              activeTab === 'seguiti'
+                ? 'text-white text-lg font-black'
+                : 'text-zinc-600 text-base font-bold'
+            }`}
+          >
+            Seguiti
+            {activeTab === 'seguiti' && (
+              <div className="absolute bottom-0 left-0 right-0 h-[3px] bg-[#D4AF37] rounded-full"></div>
+            )}
+          </button>
+        </div>
+      </header>
+
+      {/* FEED SCROLLABILE CON SNAP */}
+      <div className="h-full overflow-y-auto snap-y snap-mandatory pt-[73px] pb-20" style={{ scrollSnapType: 'y mandatory' }}>
+        {posts.length > 0 ? (
+          posts.map((post) => (
+            <div
+              key={post.id}
+              className="min-h-[calc(100vh-73px)] snap-center snap-always flex flex-col items-center justify-center py-4"
+            >
+              <div className="relative w-full max-w-[390px] mx-auto">
+                
+                {/* HEADER: AVATAR, NOME E MENU */}
+                <div className="flex items-center justify-between gap-3 mb-2 px-4">
+                  <div className="flex items-center gap-3 flex-1 min-w-0">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        router.push(`/users/${post.user_id}`);
+                      }}
+                      className="flex-shrink-0"
+                    >
+                      <div className="w-10 h-10 rounded-full overflow-hidden border-2 border-[#D4AF37]">
+                        {post.profile?.avatar_url ? (
+                          <Image
+                            src={post.profile.avatar_url}
+                            alt={post.profile.full_name}
+                            width={40}
+                            height={40}
+                            className="w-full h-full object-cover"
+                          />
+                        ) : (
+                          <div className="w-full h-full bg-zinc-800 flex items-center justify-center">
+                            <span className="text-zinc-400 text-sm font-bold">
+                              {post.profile?.full_name?.[0] || '?'}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    </button>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[#F8F8F8] font-semibold text-sm">
+                        @{post.profile?.username || post.profile?.full_name?.toLowerCase().replace(/\s/g, '') || 'anonimo'}
+                      </p>
+                      <p className="text-[#D4AF37] font-bold text-xs tracking-wide">
+                        REGISTA
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="relative flex-shrink-0">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setOpenMenuId(openMenuId === post.id ? null : post.id);
+                      }}
+                      className="w-8 h-8 flex items-center justify-center hover:scale-110 transition-transform"
+                    >
+                      <MoreVertical className="w-5 h-5 text-[#F8F8F8]" />
+                    </button>
+
+                    {openMenuId === post.id && (
+                      <div className="absolute top-10 right-0 w-48 bg-zinc-900 border border-zinc-800 rounded-xl shadow-2xl overflow-hidden animate-fadeIn z-50">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            alert('Funzione segnalazione in sviluppo');
+                            setOpenMenuId(null);
+                          }}
+                          className="w-full flex items-center gap-3 px-4 py-3 text-left text-red-400 hover:bg-red-500/10 transition-colors"
+                        >
+                          <Flag className="w-4 h-4" />
+                          <span className="text-sm font-semibold">Segnala video</span>
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDownload(post);
+                            setOpenMenuId(null);
+                          }}
+                          className="w-full flex items-center gap-3 px-4 py-3 text-left text-white hover:bg-white/5 transition-colors border-t border-zinc-800"
+                        >
+                          <Download className="w-4 h-4" />
+                          <span className="text-sm font-semibold">Scarica</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* VIDEO CON CORNICE DORATA */}
+                <div className="relative">
+                  <div 
+                    className="relative w-full aspect-[9/16] max-h-[65vh] overflow-hidden border-[3px] border-[#D4AF37] shadow-[0_0_40px_rgba(212,175,55,0.3)] bg-black cursor-pointer rounded-lg"
+                    onClick={() => handleVideoClick(post.id)}
+                  >
+                    <video
+                      ref={(el) => {
+                        videoRefs.current[post.id] = el;
+                      }}
+                      data-id={post.id}
+                      src={post.video_url}
+                      className="w-full h-full object-cover"
+                      loop
+                      playsInline
+                    />
+
+                    {pausedVideos.has(post.id) && (
+                      <div className="absolute inset-0 flex items-center justify-center z-30 bg-black/20">
+                        <div className="w-16 h-16 flex items-center justify-center rounded-full bg-white/20 backdrop-blur-md">
+                          <Play className="w-8 h-8 text-white fill-white" />
+                        </div>
+                      </div>
+                    )}
+
+                    {confettiActive === post.id && (
+                      <div className="absolute inset-0 pointer-events-none z-50 overflow-hidden">
+                        {Array.from({ length: 80 }).map((_, i) => (
+                          <div
+                            key={i}
+                            className="confetti"
+                            style={{
+                              left: `${Math.random() * 100}%`,
+                              animationDelay: `${Math.random() * 0.4}s`,
+                              animationDuration: `${1.8 + Math.random() * 0.4}s`,
+                            }}
+                          />
+                        ))}
+                      </div>
+                    )}
+
+                    <div className="absolute bottom-3 right-3 flex flex-col items-center gap-3 z-40">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleLikeToggle(post.id);
+                        }}
+                        className="flex flex-col items-center gap-1 group"
+                      >
+                        <div className={`relative transition-all duration-300 ${
+                          post.has_user_liked ? 'scale-110' : 'scale-100'
+                        }`}>
+                          {post.has_user_liked ? (
+                            <div className="text-3xl drop-shadow-[0_0_10px_rgba(212,175,55,0.8)]">🏆</div>
+                          ) : (
+                            <span className="text-2xl drop-shadow-[0_2px_8px_rgba(0,0,0,0.9)] group-hover:scale-110 transition-transform">🏆</span>
+                          )}
+                        </div>
+                        <span className={`text-xs font-bold drop-shadow-[0_2px_8px_rgba(0,0,0,0.9)] ${
+                          post.has_user_liked ? 'text-[#D4AF37]' : 'text-[#F8F8F8]'
+                        }`}>
+                          {post.likes_count}
+                        </span>
+                      </button>
+
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleShare(post);
+                        }}
+                        className="flex flex-col items-center gap-1 group"
+                      >
+                        <Share2 className="w-6 h-6 text-[#F8F8F8] drop-shadow-[0_2px_8px_rgba(0,0,0,0.9)] group-hover:scale-110 transition-transform" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* FOOTER: TITOLO */}
+                <div className="mt-3 px-4 bg-[#000000] text-center">
+                  <h2 className="text-[#F8F8F8] font-bold text-base leading-tight">
+                    {post.prompt}
+                  </h2>
+                </div>
+              </div>
+            </div>
+          ))
+        ) : (
+          <div className="h-full flex flex-col items-center justify-center px-6 text-center">
+            <div className="w-20 h-20 bg-zinc-900 rounded-full flex items-center justify-center mb-6 border border-zinc-800">
+              <AlertCircle className="w-10 h-10 text-zinc-700" />
+            </div>
+            <h3 className="text-xl font-bold text-[#F8F8F8] mb-2">Nessun Contenuto</h3>
+            <p className="text-zinc-500 text-sm max-w-xs">
+              Torna più tardi o inizia a seguire altri creatori!
+            </p>
+          </div>
+        )}
+        
+        {isFetchingMore && (
+          <div className="flex justify-center p-4">
+            <Loader2 className="w-6 h-6 text-[#D4AF37] animate-spin" />
+          </div>
+        )}
+      </div>
+
+      <style jsx global>{`
+        .animate-fadeIn { animation: fadeIn 0.2s ease-out; }
+        @keyframes fadeIn {
+          from { opacity: 0; transform: translateY(-10px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        .confetti {
+          position: absolute;
+          top: -20px;
+          width: 10px;
+          height: 16px;
+          background: linear-gradient(135deg, #D4AF37 0%, #F4D03F 50%, #D4AF37 100%);
+          animation: confettiFall linear forwards;
+          opacity: 0;
+          border-radius: 2px;
+          box-shadow: 0 0 8px rgba(212, 175, 55, 0.6);
+        }
+        @keyframes confettiFall {
+          0% { opacity: 1; transform: translateY(0) rotateZ(0deg); }
+          100% { opacity: 0; transform: translateY(100vh) rotateZ(720deg); }
+        }
+        .overflow-y-auto::-webkit-scrollbar { display: none; }
+        .overflow-y-auto { -ms-overflow-style: none; scrollbar-width: none; }
+      `}</style>
+    </main>
+  );
+}

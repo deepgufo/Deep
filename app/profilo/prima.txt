@@ -1,0 +1,780 @@
+'use client';
+
+import { useState, useEffect, useRef, Suspense } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { supabase, supabaseAdmin } from '@/lib/supabase';
+import { 
+  Camera, 
+  X, 
+  Upload, 
+  User as UserIcon, 
+  Menu, 
+  LogOut, 
+  Home, 
+  Film, 
+  Lock, 
+  Globe, 
+  Settings, 
+  ChevronLeft, 
+  Play, 
+  Trash2, 
+  AlertCircle,
+  CheckCircle2,
+  RefreshCcw,
+  Monitor,
+  Smartphone
+} from 'lucide-react';
+import Image from 'next/image';
+
+// --- INTERFACCE E TIPI ---
+interface UserProfile {
+  full_name: string;
+  avatar_url: string | null;
+  username: string;
+  bio: string | null;
+  gender: string;
+  total_oscar_received?: number; // Integrato per conteggio globale
+}
+
+interface Video {
+  id: string;
+  video_url: string;
+  prompt: string;
+  status: 'pubblico' | 'privato';
+  created_at: string;
+}
+
+/**
+ * COMPONENTE CONTENUTO PROFILO
+ * Contiene tutta la logica originale.
+ * È stato rinominato per poter essere avvolto dal Suspense.
+ */
+function ProfiloContent() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const menuRef = useRef<HTMLDivElement>(null);
+  const videoRefs = useRef<{ [key: string]: HTMLVideoElement | null }>({});
+  
+  // --- STATI PRINCIPALI ---
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  
+  // --- STATI VIDEO ---
+  const [videos, setVideos] = useState<Video[]>([]);
+  const [activeTab, setActiveTab] = useState<'film' | 'provini'>('film');
+  const [isLoadingVideos, setIsLoadingVideos] = useState(true);
+  const [selectedVideo, setSelectedVideo] = useState<Video | null>(null);
+  
+  // --- STATI FOLLOWER ---
+  const [followerCount, setFollowerCount] = useState(0);
+
+  // --- STATI MODIFICA PROFILO ---
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [editName, setEditName] = useState('');
+  const [editBio, setEditBio] = useState('');
+  const [editUsername, setEditUsername] = useState('');
+  const [editAvatarFile, setEditAvatarFile] = useState<File | null>(null);
+  const [editAvatarPreview, setEditAvatarPreview] = useState<string | null>(null);
+  const [isSavingProfile, setIsSavingProfile] = useState(false);
+  
+  // --- STATI UI AGGIUNTIVI ---
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null);
+  const [feedbackMessage, setFeedbackMessage] = useState<{type: 'success' | 'error', text: string} | null>(null);
+
+  // --- LOGICA DI NAVIGAZIONE E URL ---
+  useEffect(() => {
+    const tab = searchParams.get('tab');
+    if (tab === 'provini') {
+      setActiveTab('provini');
+    } else {
+      setActiveTab('film');
+    }
+  }, [searchParams]);
+
+  const handleTabChange = (newTab: 'film' | 'provini') => {
+    setActiveTab(newTab);
+    const params = new URLSearchParams(searchParams.toString());
+    params.set('tab', newTab);
+    router.push(`?${params.toString()}`, { scroll: false });
+  };
+
+  // --- CARICAMENTO INIZIALE DATI ---
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadInitialData = async () => {
+      try {
+        console.log('🔄 Avvio caricamento dati profilo e video...');
+        
+        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+        
+        if (!isMounted) return;
+        
+        if (sessionError || !session?.user) {
+          console.warn('⚠️ Sessione non valida o scaduta');
+          router.push('/auth');
+          return;
+        }
+        
+        const userId = session.user.id;
+        console.log('✅ Utente autenticato:', userId);
+
+        const profilePromise = supabase
+          .from('profiles')
+          .select('full_name, avatar_url, username, bio, gender, total_oscar_received')
+          .eq('id', userId)
+          .single();
+
+        const videoPromise = supabase
+          .from('films')
+          .select('id, video_url, prompt, status, created_at')
+          .eq('user_id', userId)
+          .order('created_at', { ascending: false });
+
+        const [profileRes, videoRes] = await Promise.all([profilePromise, videoPromise]);
+
+        if (!isMounted) return;
+
+        if (profileRes.error) {
+          console.error('❌ Errore Database Profilo:', profileRes.error);
+          if (profileRes.error.code === 'PGRST116') {
+            router.push('/completamento-profilo');
+          }
+        } else {
+          setProfile(profileRes.data);
+          console.log('✅ Profilo caricato correttamente');
+        }
+
+        if (videoRes.error) {
+          console.error('❌ Errore Database Video:', videoRes.error);
+        } else {
+          setVideos(videoRes.data || []);
+          console.log(`✅ Caricati ${videoRes.data?.length || 0} video`);
+        }
+
+        // Carica conteggio follower reale
+        const { count: totalFollowers } = await supabase
+          .from('follows')
+          .select('*', { count: 'exact', head: true })
+          .eq('following_id', userId);
+
+        if (totalFollowers !== null) {
+          setFollowerCount(totalFollowers);
+          console.log(`✅ Follower: ${totalFollowers}`);
+        }
+
+      } catch (err) {
+        console.error('❌ Errore fatale durante init:', err);
+      } finally {
+        if (isMounted) {
+          setIsLoading(false);
+          setIsLoadingVideos(false);
+        }
+      }
+    };
+
+    loadInitialData();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [router]);
+
+  // --- GESTIONE MODIFICA PROFILO ---
+  const openEditModal = () => {
+    if (profile) {
+      setEditName(profile.full_name || '');
+      setEditBio(profile.bio || '');
+      setEditUsername(profile.username || '');
+      setEditAvatarPreview(profile.avatar_url);
+      setIsEditModalOpen(true);
+    }
+  };
+
+  const closeEditModal = () => {
+    if (isSavingProfile) return;
+    setIsEditModalOpen(false);
+    setEditAvatarFile(null);
+    setEditAvatarPreview(null);
+  };
+
+  const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (file.size > 5 * 1024 * 1024) {
+        alert("L'immagine è troppo grande. Massimo 5MB.");
+        return;
+      }
+      setEditAvatarFile(file);
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setEditAvatarPreview(reader.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const saveProfile = async () => {
+    if (!profile) return;
+    setIsSavingProfile(true);
+    
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.user) throw new Error("Sessione mancante");
+
+      let avatarUrl = profile.avatar_url;
+
+      if (editAvatarFile && supabaseAdmin) {
+        const fileExt = editAvatarFile.name.split('.').pop();
+        const fileName = `${session.user.id}-${Date.now()}.${fileExt}`;
+
+        const { error: uploadError } = await supabaseAdmin.storage
+          .from('avatars')
+          .upload(fileName, editAvatarFile, { upsert: true });
+
+        if (uploadError) throw uploadError;
+
+        const { data: urlData } = supabaseAdmin.storage
+          .from('avatars')
+          .getPublicUrl(fileName);
+
+        avatarUrl = urlData.publicUrl;
+      }
+
+      const updatedData = {
+        id: session.user.id,
+        full_name: editName,
+        bio: editBio,
+        username: editUsername,
+        avatar_url: avatarUrl,
+        updated_at: new Date().toISOString()
+      };
+
+      if (!supabaseAdmin) throw new Error("Service Role non configurato");
+
+      const { error: updateError } = await supabaseAdmin
+        .from('profiles')
+        .upsert(updatedData);
+
+      if (updateError) throw updateError;
+
+      setProfile({
+        ...profile,
+        full_name: editName,
+        bio: editBio,
+        username: editUsername,
+        avatar_url: avatarUrl,
+      });
+
+      setFeedbackMessage({ type: 'success', text: 'Profilo aggiornato!' });
+      setTimeout(() => setFeedbackMessage(null), 3000);
+      closeEditModal();
+
+    } catch (error: any) {
+      console.error('Errore salvataggio:', error);
+      alert(`Errore: ${error.message || 'Impossibile salvare'}`);
+    } finally {
+      setIsSavingProfile(false);
+    }
+  };
+
+  // --- GESTIONE VIDEO ---
+  const handleDeleteVideo = async (videoId: string) => {
+    try {
+      const { error } = await supabase
+        .from('films')
+        .delete()
+        .eq('id', videoId);
+
+      if (error) throw error;
+
+      setVideos(prev => prev.filter(v => v.id !== videoId));
+      setShowDeleteConfirm(null);
+      setFeedbackMessage({ type: 'success', text: 'Video eliminato' });
+      setTimeout(() => setFeedbackMessage(null), 2000);
+    } catch (err) {
+      alert("Errore durante l'eliminazione");
+    }
+  };
+
+  const toggleVideoPlayback = (id: string) => {
+    const video = videoRefs.current[id];
+    if (video) {
+      if (video.paused) {
+        video.play();
+      } else {
+        video.pause();
+      }
+    }
+  };
+
+  // --- LOGICA UI ---
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setIsMenuOpen(false);
+      }
+    };
+    if (isMenuOpen) document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [isMenuOpen]);
+
+  const filteredVideos = videos.filter(v => 
+    activeTab === 'film' ? v.status === 'pubblico' : v.status === 'privato'
+  );
+
+  // --- RENDER LOADING ---
+  if (isLoading && !profile) {
+    return (
+      <div className="flex flex-col items-center justify-center h-screen bg-black">
+        <div className="relative w-20 h-20">
+          <div className="absolute inset-0 border-4 border-yellow-400/20 rounded-full"></div>
+          <div className="absolute inset-0 border-4 border-yellow-400 rounded-full border-t-transparent animate-spin"></div>
+        </div>
+        <p className="mt-6 text-zinc-500 font-medium animate-pulse uppercase tracking-widest text-xs">
+          Loading Cinematic Profile
+        </p>
+      </div>
+    );
+  }
+
+  // --- RENDER NO PROFILE ---
+  if (!profile) {
+    return (
+      <div className="flex flex-col items-center justify-center h-screen bg-black px-6 text-center">
+        <div className="w-20 h-20 bg-zinc-900 rounded-full flex items-center justify-center mb-6 border border-zinc-800">
+          <AlertCircle className="w-10 h-10 text-zinc-600" />
+        </div>
+        <h2 className="text-2xl font-bold text-white mb-2">Accesso Negato</h2>
+        <p className="text-zinc-400 mb-8 max-w-xs">Non abbiamo trovato i dati del tuo profilo. Potrebbe essere un problema di sincronizzazione.</p>
+        <button
+          onClick={() => router.push('/completamento-profilo')}
+          className="w-full max-w-xs bg-yellow-400 text-black py-4 rounded-xl font-bold hover:bg-yellow-300 transition-all active:scale-95"
+        >
+          CREA PROFILO ORA
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <main className="fixed inset-0 bg-black text-white font-sans selection:bg-yellow-400/30">
+      {/* FEEDBACK OVERLAY */}
+      {feedbackMessage && (
+        <div className={`fixed top-20 left-1/2 -translate-x-1/2 z-[2000] px-6 py-3 rounded-full shadow-2xl flex items-center gap-3 animate-bounce ${
+          feedbackMessage.type === 'success' ? 'bg-green-500' : 'bg-red-500'
+        }`}>
+          {feedbackMessage.type === 'success' ? <CheckCircle2 className="w-5 h-5" /> : <AlertCircle className="w-5 h-5" />}
+          <span className="font-bold text-sm uppercase">{feedbackMessage.text}</span>
+        </div>
+      )}
+
+      <div className="h-full overflow-y-auto overflow-x-hidden custom-scrollbar">
+        {/* TOP BAR E NAVBAR */}
+        <header className="sticky top-0 z-[100] bg-black/95 backdrop-blur-xl border-b border-zinc-900">
+          <div className="max-w-2xl mx-auto flex items-center justify-between px-5 py-4">
+            <button 
+              onClick={() => router.push('/crea')}
+              className="p-2 text-zinc-400 hover:text-yellow-400 transition-all duration-300 active:scale-95"
+            >
+              <ChevronLeft className="w-6 h-6" />
+            </button>
+
+            <div className="relative" ref={menuRef}>
+              <button 
+                onClick={() => setIsMenuOpen(!isMenuOpen)}
+                className="p-2 text-zinc-400 hover:text-yellow-400 transition-all duration-300 active:scale-95"
+              >
+                <Menu className="w-6 h-6" />
+              </button>
+
+              {isMenuOpen && (
+                <div className="absolute right-0 mt-3 w-56 bg-zinc-900 border border-zinc-800 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.8)] overflow-hidden animate-fadeIn">
+                  <button 
+                    onClick={() => {
+                      setIsMenuOpen(false);
+                      openEditModal();
+                    }} 
+                    className="w-full flex items-center gap-3 px-5 py-4 text-left hover:bg-yellow-400/10 transition-colors border-b border-zinc-800"
+                  >
+                    <Settings className="w-5 h-5 text-yellow-400" />
+                    <span className="text-sm font-bold text-white">Modifica Profilo</span>
+                  </button>
+                  <button 
+                    onClick={async () => {
+                      await supabase.auth.signOut();
+                      router.push('/auth');
+                    }}
+                    className="w-full flex items-center gap-3 px-5 py-4 text-left text-red-400 hover:bg-red-500/10 transition-colors"
+                  >
+                    <LogOut className="w-5 h-5" />
+                    <span className="text-sm font-bold">Esci</span>
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </header>
+
+        {/* HERO SECTION PROFILO */}
+        <section className="relative pt-8 pb-6 px-5">
+          <div className="max-w-2xl mx-auto flex flex-col items-center">
+            
+            {/* AVATAR CONTAINER */}
+            <div className="group relative mb-6">
+              <div className="absolute inset-0 bg-yellow-400 rounded-full blur-[60px] opacity-30 group-hover:opacity-50 transition-opacity duration-500"></div>
+              <div className="relative w-32 h-32 rounded-full p-[3px] bg-gradient-to-br from-yellow-400 via-yellow-500 to-yellow-600 shadow-[0_0_40px_rgba(250,204,21,0.4)]">
+                <div className="w-full h-full rounded-full bg-black overflow-hidden relative">
+                  {profile.avatar_url ? (
+                    <Image 
+                      src={profile.avatar_url} 
+                      alt="Profile" 
+                      fill
+                      className="object-cover transition-transform duration-700 group-hover:scale-110"
+                      priority
+                    />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center bg-zinc-900">
+                      <UserIcon className="w-14 h-14 text-zinc-700" />
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* IDENTITA */}
+            <h1 className="text-3xl font-bold text-white mb-2 text-center">
+              {profile.full_name}
+            </h1>
+            
+            <div className="flex items-center gap-3 mb-6">
+              <span className="text-zinc-400 text-sm">@{profile.username}</span>
+              <div className="w-px h-4 bg-zinc-700"></div>
+              <span className="text-zinc-500 text-sm">{profile.gender === 'M' ? 'Attore' : 'Attrice'}</span>
+            </div>
+
+            {/* SEPARATORE */}
+            <div className="w-full max-w-md h-px bg-zinc-900 mb-6"></div>
+
+            {/* ACTION AREA */}
+            <button
+              onClick={openEditModal}
+              className="w-full max-w-md px-6 py-3.5 bg-zinc-900 border border-zinc-800 rounded-xl text-white text-sm font-semibold hover:bg-zinc-800 hover:border-yellow-400/30 hover:shadow-[0_0_20px_rgba(250,204,21,0.1)] transition-all duration-300 active:scale-[0.98]"
+            >
+              Modifica Profilo
+            </button>
+
+            {/* SEPARATORE */}
+            <div className="w-full max-w-md h-px bg-zinc-900 my-6"></div>
+
+            {/* STATS BAR */}
+            <div className="w-full max-w-md grid grid-cols-3 gap-0 bg-black border border-zinc-900 rounded-2xl overflow-hidden">
+              <div className="py-5 flex flex-col items-center border-r border-zinc-900">
+                <p className="text-2xl font-bold text-yellow-400 mb-1">{videos.filter(v => v.status === 'pubblico').length}</p>
+                <p className="text-xs text-zinc-500 font-semibold">Film</p>
+              </div>
+              <div className="py-5 flex flex-col items-center border-r border-zinc-900">
+                <p className="text-2xl font-bold text-white mb-1">{followerCount}</p>
+                <p className="text-xs text-zinc-500 font-semibold">Follower</p>
+              </div>
+              <div className="py-5 flex flex-col items-center">
+                {/* Visualizza il "gemello" total_oscar_received dal profilo */}
+                <p className="text-2xl font-bold text-white mb-1">{profile.total_oscar_received || 0} 🏆</p>
+                <p className="text-xs text-zinc-500 font-semibold">Oscar</p>
+              </div>
+            </div>
+
+            {/* SEPARATORE */}
+            <div className="w-full max-w-md h-px bg-zinc-900 my-6"></div>
+
+            {/* BIO SECTION */}
+            {profile.bio && (
+              <>
+                <p className="text-zinc-400 text-sm text-center leading-relaxed max-w-md mb-6">
+                  {profile.bio}
+                </p>
+                <div className="w-full max-w-md h-px bg-zinc-900 mb-6"></div>
+              </>
+            )}
+          </div>
+        </section>
+
+        {/* SEZIONE VIDEO - TABS INTERFACE */}
+        <section className="bg-zinc-950/50 min-h-screen">
+          <div className="max-w-2xl mx-auto">
+            {/* TABS NAVBAR */}
+            <div className="flex sticky top-[73px] z-[90] bg-black/95 backdrop-blur-xl border-b border-zinc-900">
+              <button 
+                onClick={() => handleTabChange('film')}
+                className={`flex-1 py-5 flex items-center justify-center gap-2.5 transition-all duration-500 relative ${
+                  activeTab === 'film' ? 'text-yellow-400' : 'text-zinc-600 hover:text-zinc-400'
+                }`}
+              >
+                <span className="text-xs font-black uppercase tracking-[0.3em]" style={{ fontFamily: 'ui-serif, Georgia, serif' }}>
+                  FILM 🎬
+                </span>
+                {activeTab === 'film' && (
+                  <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-yellow-400 shadow-[0_-2px_10px_rgba(250,204,21,0.5)]"></div>
+                )}
+              </button>
+              
+              <button 
+                onClick={() => handleTabChange('provini')}
+                className={`flex-1 py-5 flex items-center justify-center gap-2.5 transition-all duration-500 relative ${
+                  activeTab === 'provini' ? 'text-white' : 'text-zinc-600 hover:text-zinc-400'
+                }`}
+              >
+                <Lock className="w-4 h-4" />
+                <span className="text-xs font-bold uppercase tracking-wider">Provini</span>
+                {activeTab === 'provini' && (
+                  <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-white shadow-[0_-2px_10px_rgba(255,255,255,0.3)]"></div>
+                )}
+              </button>
+            </div>
+
+            {/* VIDEO GRID */}
+            <div className="p-4 md:p-6">
+              {isLoadingVideos ? (
+                <div className="grid grid-cols-2 gap-4 animate-pulse">
+                  {[1, 2, 3, 4].map(i => (
+                    <div key={i} className="aspect-[9/16] bg-zinc-900 rounded-2xl"></div>
+                  ))}
+                </div>
+              ) : filteredVideos.length > 0 ? (
+                <div className="grid grid-cols-2 gap-4">
+                  {filteredVideos.map((video) => (
+                    <div 
+                      key={video.id}
+                      className="group relative aspect-[9/16] bg-zinc-900 rounded-2xl overflow-hidden border border-zinc-800 transition-all hover:scale-[1.02] hover:border-zinc-600 hover:shadow-[0_15px_30px_rgba(0,0,0,0.6)]"
+                    >
+                      <video
+                        ref={el => { videoRefs.current[video.id] = el }}
+                        src={video.video_url}
+                        className="w-full h-full object-cover"
+                        loop
+                        muted
+                        playsInline
+                        onClick={() => toggleVideoPlayback(video.id)}
+                      />
+                      
+                      {/* OVERLAY INFO */}
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/40 to-transparent opacity-0 group-hover:opacity-100 transition-all duration-300 p-4 flex flex-col justify-end">
+                        <p className="text-[10px] text-white/80 line-clamp-2 italic mb-3">
+                          "{video.prompt}"
+                        </p>
+                        
+                        <div className="flex items-center gap-2">
+                          <button 
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedVideo(video);
+                            }}
+                            className="flex-1 bg-yellow-400 text-black py-2 rounded-xl font-bold text-[10px] uppercase hover:bg-yellow-300 transition-all active:scale-95"
+                          >
+                            Play
+                          </button>
+                          <button 
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setShowDeleteConfirm(video.id);
+                            }}
+                            className="w-10 h-10 bg-white/10 backdrop-blur-md text-white rounded-xl flex items-center justify-center hover:bg-red-500 transition-all"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* PLAY ICON */}
+                      <div className="absolute inset-0 flex items-center justify-center pointer-events-none group-hover:opacity-0 transition-opacity">
+                          <div className="w-12 h-12 rounded-full bg-black/30 backdrop-blur-sm border border-white/20 flex items-center justify-center">
+                            <Play className="w-5 h-5 text-white/60 fill-white/20" />
+                          </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="py-20 text-center">
+                  <div className="w-20 h-20 bg-zinc-900 rounded-full flex items-center justify-center mx-auto mb-6 border border-zinc-800">
+                    <Film className="w-9 h-9 text-zinc-700" />
+                  </div>
+                  <h3 className="text-lg font-bold text-zinc-500 uppercase tracking-wider mb-2">Nessun Contenuto</h3>
+                  <p className="text-zinc-700 text-xs max-w-xs mx-auto">
+                    I tuoi video appariranno qui
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+        </section>
+
+        {/* MODAL: MODIFICA PROFILO */}
+        {isEditModalOpen && (
+          <div className="fixed inset-0 z-[1000] bg-black/95 backdrop-blur-xl flex items-center justify-center p-4">
+            <div className="w-full max-w-lg bg-zinc-950 rounded-3xl border border-zinc-800 overflow-hidden shadow-2xl animate-fadeIn">
+              {/* MODAL HEADER */}
+              <div className="px-6 py-5 border-b border-zinc-900 flex items-center justify-between bg-zinc-900/50">
+                <button 
+                  onClick={closeEditModal} 
+                  className="text-zinc-500 hover:text-white font-semibold text-sm transition-colors"
+                  disabled={isSavingProfile}
+                >
+                  Annulla
+                </button>
+                <h3 className="text-white font-bold text-sm">Modifica Profilo</h3>
+                <button 
+                  onClick={saveProfile}
+                  disabled={isSavingProfile}
+                  className="text-yellow-400 font-bold text-sm hover:text-yellow-300 transition-colors disabled:opacity-40"
+                >
+                  {isSavingProfile ? 'Salvo...' : 'Salva'}
+                </button>
+              </div>
+
+              <div className="p-6 max-h-[70vh] overflow-y-auto custom-scrollbar">
+                {/* AVATAR PICKER */}
+                <div className="flex flex-col items-center mb-8">
+                  <div className="relative group">
+                    <div className="w-28 h-28 rounded-full overflow-hidden border-2 border-zinc-800 bg-black shadow-xl relative">
+                      {editAvatarPreview ? (
+                        <img src={editAvatarPreview} alt="Preview" className="w-full h-full object-cover" />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center text-zinc-700">
+                          <UserIcon className="w-12 h-12" />
+                        </div>
+                      )}
+                    </div>
+                    <label className="absolute inset-0 flex items-center justify-center bg-black/70 opacity-0 group-hover:opacity-100 transition-all cursor-pointer rounded-full backdrop-blur-sm">
+                      <Upload className="w-6 h-6 text-yellow-400" />
+                      <input type="file" accept="image/*" onChange={handleAvatarChange} className="hidden" />
+                    </label>
+                  </div>
+                  <p className="mt-4 text-xs font-semibold text-yellow-400">Cambia Foto</p>
+                </div>
+
+                {/* FORM FIELDS */}
+                <div className="space-y-5">
+                  <div className="space-y-2">
+                    <label className="block text-xs font-semibold text-zinc-500">Nome Completo</label>
+                    <input 
+                      type="text"
+                      value={editName}
+                      onChange={(e) => setEditName(e.target.value)}
+                      className="w-full bg-zinc-900 border border-zinc-800 text-white px-4 py-3 rounded-xl focus:outline-none focus:border-yellow-400 focus:ring-1 focus:ring-yellow-400/50 transition-all"
+                      placeholder="Il tuo nome"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="block text-xs font-semibold text-zinc-500">Username</label>
+                    <div className="relative">
+                      <span className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-600 font-bold">@</span>
+                      <input 
+                        type="text"
+                        value={editUsername}
+                        onChange={(e) => setEditUsername(e.target.value.toLowerCase().replace(/\s/g, ''))}
+                        className="w-full bg-zinc-900 border border-zinc-800 text-white pl-10 pr-4 py-3 rounded-xl focus:outline-none focus:border-yellow-400 focus:ring-1 focus:ring-yellow-400/50 transition-all"
+                        placeholder="username"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="block text-xs font-semibold text-zinc-500">Bio</label>
+                    <textarea 
+                      rows={4}
+                      value={editBio}
+                      onChange={(e) => setEditBio(e.target.value)}
+                      placeholder="Racconta qualcosa di te..."
+                      className="w-full bg-zinc-900 border border-zinc-800 text-white px-4 py-3 rounded-xl focus:outline-none focus:border-yellow-400 focus:ring-1 focus:ring-yellow-400/50 transition-all resize-none text-sm leading-relaxed"
+                    />
+                    <div className="flex justify-end">
+                      <span className={`text-xs font-semibold ${editBio.length > 180 ? 'text-red-500' : 'text-zinc-600'}`}>
+                        {editBio.length}/200
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* MODAL: CONFERMA ELIMINAZIONE */}
+        {showDeleteConfirm && (
+          <div className="fixed inset-0 z-[2000] bg-black/95 backdrop-blur-md flex items-center justify-center p-6">
+            <div className="w-full max-w-sm bg-zinc-950 rounded-3xl p-8 border border-zinc-900 text-center shadow-2xl animate-fadeIn">
+              <div className="w-16 h-16 bg-red-500/10 rounded-full flex items-center justify-center mx-auto mb-6 border border-red-500/20">
+                <Trash2 className="w-8 h-8 text-red-500" />
+              </div>
+              <h4 className="text-xl font-bold text-white mb-2">Eliminare il video?</h4>
+              <p className="text-zinc-500 text-sm mb-8 leading-relaxed">
+                Questa azione è irreversibile e il contenuto verrà rimosso definitivamente.
+              </p>
+              <div className="space-y-3">
+                <button 
+                  onClick={() => handleDeleteVideo(showDeleteConfirm)}
+                  className="w-full bg-red-600 text-white py-3.5 rounded-xl font-bold text-sm hover:bg-red-500 transition-all active:scale-95"
+                >
+                  Elimina Definitivamente
+                </button>
+                <button 
+                  onClick={() => setShowDeleteConfirm(null)}
+                  className="w-full bg-zinc-900 text-zinc-400 py-3.5 rounded-xl font-semibold text-sm hover:text-white hover:bg-zinc-800 transition-all"
+                >
+                  Annulla
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* FOOTER */}
+        <footer className="py-16 flex flex-col items-center justify-center gap-4 opacity-30">
+          <div className="h-px w-32 bg-gradient-to-r from-transparent via-zinc-800 to-transparent"></div>
+          <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-zinc-700">Cinema Scuola</p>
+        </footer>
+      </div>
+
+      <style jsx global>{`
+        .custom-scrollbar::-webkit-scrollbar {
+          width: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+          background: transparent;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+          background: #27272a;
+          border-radius: 10px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+          background: #3f3f46;
+        }
+        
+        @keyframes fadeIn {
+          from { opacity: 0; transform: translateY(20px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        
+        .animate-fadeIn {
+          animation: fadeIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+        }
+      `}</style>
+    </main>
+  );
+}
+
+/**
+ * WRAPPER DI ESPORTAZIONE
+ * Questo è il fix per l'errore di Vercel: avvolgiamo il componente
+ * che usa useSearchParams in un Boundary Suspense.
+ */
+export default function ProfiloPage() {
+  return (
+    <Suspense fallback={<div className="flex h-screen w-full items-center justify-center bg-black text-white">Caricamento...</div>}>
+      <ProfiloContent />
+    </Suspense>
+  );
+}

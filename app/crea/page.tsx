@@ -1,0 +1,420 @@
+'use client';
+
+import { useState, useMemo, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+import { supabase } from '@/lib/supabase';
+import { Sparkles, Film, Users, Zap } from 'lucide-react';
+import PageBackground from '../components/PageBackground';
+
+// Ho aggiunto la proprietà 'emoji' per il nuovo design, 
+// mantenendo intatti gli id e i testi originali.
+const SINGLE_SUGGESTIONS = [
+  { id: 1, text: 'POV: Hai preso 3 alla verifica ma sai già che il tuo video farà più visualizzazioni dello stipendio del prof', emoji: '📉' },
+  { id: 2, text: 'POV: La campanella suona e tu scappi via dall\'aula come se avessi appena rapinato una banca', emoji: '🏃‍♂️' },
+  { id: 3, text: 'POV: Il prof ti interroga a sorpresa ma tu sei troppo occupato a pensare a cosa mangerai a ricreazione', emoji: '🥪' },
+  { id: 4, text: 'POV: Ascolti il compagno "lecchino" che parla con il prof e ti chiedi se vive in una simulazione (è un NPC)', emoji: '🤖' },
+  { id: 5, text: 'POV: stai fumando nelle scale del polo ma pullappa Gallo e ti chiede due tiri', emoji: '🚬' },
+  { id: 6, text: 'POV: Catania ha pippato tutta la notte e ti mette una nota solo perche è in astinenza', emoji: '👀' },
+];
+
+const COUPLE_SUGGESTIONS = [
+  { id: 1, text: '❤️ Io e lei come nessuno mai', emoji: '❤️' },
+  { id: 2, text: '🚗 Io e il bro abbiamo investito una vecchia', emoji: '🚗' },
+  { id: 3, text: '🏃 Noi due contro il mondo in un inseguimento', emoji: '🏃' },
+  { id: 4, text: '💰 Io e la mia tipa in una rapina finita male', emoji: '💰' },
+  { id: 5, text: '💎 Io e il mio complice dopo il colpo del secolo', emoji: '💎' },
+  { id: 7, text: '🏜️ Io e il mio migliore amico dispersi nel deserto', emoji: '🏜️' },
+];
+
+const LOADING_MESSAGES = [
+  'Corrompendo il regista...',
+  'Cucinando i popcorn...',
+  'Scrivendo il finale strappalacrime...',
+  'Cercando una controfigura economica...',
+  'Mettendo in ordine i pixel...',
+];
+
+export default function CreaPage() {
+  const router = useRouter();
+  const [prompt, setPrompt] = useState('');
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [showAuthPrompt, setShowAuthPrompt] = useState(false);
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [loadingMessageIndex, setLoadingMessageIndex] = useState(0);
+  const [isSystemChecking, setIsSystemChecking] = useState(true); // Stato per il Kill-Switch
+  
+  const [isCoupleMode, setIsCoupleMode] = useState(false);
+  const [coupleName, setCoupleName] = useState('');
+
+  // STATI PER IL LIMITE GIORNALIERO
+  const [dailyCount, setDailyCount] = useState(0);
+  const [isLimitError, setIsLimitError] = useState(false);
+  const [showTimeError, setShowTimeError] = useState(false);
+
+  const currentSuggestions = useMemo(() => {
+    return isCoupleMode ? COUPLE_SUGGESTIONS : SINGLE_SUGGESTIONS;
+  }, [isCoupleMode]);
+
+  // RESET STATO E CARICAMENTO LIMITI AL MONTAGGIO
+  useEffect(() => {
+    setIsGenerating(false);
+    
+    const checkAuthAndLimits = async () => {
+      // --- CONTROLLO KILL-SWITCH / MAINTENANCE ---
+      try {
+        const { data: config } = await supabase
+          .from('system_config')
+          .select('maintenance_mode')
+          .eq('id', 1)
+          .single();
+        
+        if (config?.maintenance_mode) {
+          router.push('/manutenzione-soft');
+          return;
+        }
+      } catch (err) {
+        console.error("Errore controllo manutenzione", err);
+      }
+      setIsSystemChecking(false);
+      // ------------------------------------------
+
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session) {
+        setIsLoggedIn(true);
+        // Recupera il conteggio attuale dal profilo
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('daily_video_count, last_video_date')
+          .eq('id', session.user.id)
+          .single();
+
+        const today = new Date().toISOString().split('T')[0];
+        if (profile?.last_video_date === today) {
+          setDailyCount(profile.daily_video_count || 0);
+        } else {
+          setDailyCount(0);
+        }
+      }
+    };
+    
+    checkAuthAndLimits();
+  }, [router]);
+
+  useEffect(() => {
+    if (!isGenerating) return;
+    const interval = setInterval(() => {
+      setLoadingMessageIndex((prevIndex) => (prevIndex + 1) % LOADING_MESSAGES.length);
+    }, 800);
+    return () => clearInterval(interval);
+  }, [isGenerating]);
+
+  const handlePillClick = (text: string, id: number) => {
+    setPrompt(text);
+    setSelectedId(id);
+  };
+
+  const generateVideoUrl = (category: string) => {
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://kspgjxfhtadmchtnhnun.supabase.co';
+    const basePath = `${supabaseUrl}/storage/v1/object/public/video-clips`;
+    
+    const videoCount: { [key: string]: number } = {
+      action: 3,
+      commedia: 3,
+      dramma: 3,
+      coppia: 3
+    };
+
+    const validCategory = videoCount[category] ? category : 'commedia';
+    const maxVideos = videoCount[validCategory];
+    const randomIndex = Math.floor(Math.random() * maxVideos) + 1;
+    const formattedIndex = randomIndex.toString().padStart(2, '0');
+    
+    const finalUrl = `${basePath}/${validCategory}/${validCategory}_${formattedIndex}.mp4`;
+    return finalUrl;
+  };
+
+  const handleGenerateFilm = async () => {
+    if (!isLoggedIn) {
+      setShowAuthPrompt(true);
+      setTimeout(() => setShowAuthPrompt(false), 4000);
+      return;
+    }
+
+    // 1. CONTROLLO ORARIO (08:00 - 23:00)
+    const stringTime = new Date().toLocaleString("en-US", { timeZone: "Europe/Rome" });
+    const localTime = new Date(stringTime);
+    const currentHour = localTime.getHours();
+
+    if (currentHour < 8 || currentHour >= 23) {
+      setShowTimeError(true);
+      setTimeout(() => setShowTimeError(false), 4000);
+      return;
+    }
+
+    // 2. CONTROLLO LIMITE VIDEO (2/2)
+    if (dailyCount >= 2) {
+      setIsLimitError(true);
+      setTimeout(() => setIsLimitError(false), 2000);
+      return;
+    }
+
+    if (!prompt.trim()) {
+      alert('Scrivi prima cosa vuoi creare! ✍️');
+      return;
+    }
+
+    if (isCoupleMode && !coupleName.trim()) {
+      alert('Inserisci il nome del tuo complice! 👥');
+      return;
+    }
+
+    try {
+      setIsGenerating(true);
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 6000); 
+
+      let finalCategory = 'commedia'; 
+
+      try {
+        const classificationResponse = await fetch('/api/classify-text', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            text: prompt,
+            isCoupleMode: isCoupleMode 
+          }),
+          signal: controller.signal
+        });
+
+        clearTimeout(timeoutId);
+
+        if (classificationResponse.ok) {
+          const data = await classificationResponse.json();
+          finalCategory = data.category;
+        }
+      } catch (err: any) {
+        console.warn('⚠️ Fallback default');
+      }
+
+      const selectedVideoUrl = generateVideoUrl(finalCategory);
+
+      const params = new URLSearchParams({
+        videoUrl: selectedVideoUrl,
+        trauma: prompt, 
+        category: finalCategory,
+        ...(isCoupleMode && { coupleName: coupleName })
+      });
+
+      router.push(`/finalizzazione?${params.toString()}`);
+
+    } catch (error) {
+      console.error('❌ Errore:', error);
+      setIsGenerating(false);
+      alert('C\'è stato un problema. Riprova!');
+    }
+  };
+
+  const toggleCoupleMode = () => {
+    setIsCoupleMode(!isCoupleMode);
+    setSelectedId(null); // Reset selezione quando si cambia modo
+    if (!isCoupleMode) setCoupleName('');
+  };
+
+  // Calcolo per l'attivazione visiva del bottone
+  const isPromptReady = prompt.length >= 10;
+
+  // Schermata nera vuota mentre controlla il Kill-Switch
+  if (isSystemChecking) {
+    return <div className="h-[100dvh] w-full bg-[#0A0A0A]" />;
+  }
+
+  return (
+    <PageBackground>
+      {/* Container Generale: h-[100dvh] con overflow-hidden rende lo schermo fisso e non scrollabile */}
+      <div className="h-[100dvh] w-full bg-[#0A0A0A] text-white font-sans overflow-hidden flex flex-col px-4 pt-10 pb-6 relative">
+        
+        {/* Gradienti Radiali per profondità spaziale */}
+        <div className="absolute top-[-10%] left-[-10%] w-[50vw] h-[50vw] bg-[#2A0845] opacity-20 rounded-full blur-[100px] pointer-events-none" />
+        <div className="absolute bottom-[10%] right-[-10%] w-[60vw] h-[60vw] bg-[#001B3A] opacity-30 rounded-full blur-[120px] pointer-events-none" />
+
+        <div className="relative z-10 w-full max-w-md mx-auto h-full flex flex-col justify-between">
+          
+          {/* HEADER (Pillole in linea in alto) */}
+          <div className="flex-shrink-0 animate-fadeIn relative flex justify-between items-center mb-4">
+            
+            {/* Toggle Modalità Coppia a Sinistra */}
+            <button
+              onClick={toggleCoupleMode}
+              className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full transition-all duration-300 border ${
+                isCoupleMode
+                  ? 'bg-[#FFCC00]/10 border-[#FFCC00] shadow-[0_0_10px_rgba(255,204,0,0.2)]'
+                  : 'bg-[#1A1A1A] border-zinc-800 hover:bg-[#1F2937]'
+              }`}
+            >
+              <Users className={`w-3.5 h-3.5 ${isCoupleMode ? 'text-[#FFCC00]' : 'text-gray-400'}`} />
+              <span className={`text-[11px] font-bold tracking-wide ${isCoupleMode ? 'text-[#FFCC00]' : 'text-gray-400'}`}>
+                {isCoupleMode ? 'COPPIA' : 'COPPIA'}
+              </span>
+            </button>
+
+            {/* Pillola Crediti a Destra (Sottrazione per mostrare i rimanenti) */}
+            <div className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 bg-[#1A1A1A] border border-[#FFCC00] rounded-full shadow-[0_0_15px_rgba(255,204,0,0.15)] animate-floating">
+              <Zap className="w-3.5 h-3.5 text-[#FFCC00] fill-[#FFCC00]" />
+              <span className="text-[12px] font-bold text-white mt-[1px]">
+                {Math.max(0, 2 - dailyCount)}/2
+              </span>
+            </div>
+          </div>
+
+          {/* TITOLO CENTRALE */}
+          <div className="text-center animate-fadeIn mb-4">
+            <h1 className="text-[26px] sm:text-[28px] font-extrabold text-[#FFFFFF] tracking-tight leading-tight">
+              Trasforma il tuo POV<br/>in Cinema
+            </h1>
+          </div>
+
+          {/* AREA CENTRALE (SOTTOTITOLO A SX + INPUT) */}
+          <div className="flex-shrink-0 flex flex-col gap-2.5 animate-fadeIn delay-200">
+            {/* Sottotitolo a sinistra sopra il campo testo */}
+            <p className="text-[13px] font-medium text-[#9CA3AF] text-left pl-1">
+              Droppa la hit del giorno e l&apos;IA lo trasforma in un film
+            </p>
+
+            {/* INPUT CENTRALE MAGICO CON LIMITE 150 CARATTERI */}
+            <div className="relative rounded-[24px] p-[1px] bg-gradient-to-br from-[#FFD700] to-transparent shadow-[0_4px_30px_rgba(0,0,0,0.1)]">
+              <div className="relative w-full h-[105px] bg-[#000000]/80 backdrop-blur-[10px] rounded-[23px] overflow-hidden flex flex-col">
+                <textarea
+                  value={prompt}
+                  onChange={(e) => {
+                      setPrompt(e.target.value);
+                      setSelectedId(null);
+                  }}
+                  placeholder="Scrivi la tua pazzia qui..."
+                  className="w-full h-full bg-transparent border-none px-4 py-3.5 text-white placeholder-[#4B5563] focus:outline-none resize-none text-[15px] leading-relaxed"
+                  maxLength={150}
+                />
+                <div className="absolute bottom-2 right-4 text-[#4B5563] text-[9px] font-bold">
+                  {prompt.length}/150
+                </div>
+              </div>
+            </div>
+
+            {/* Input Nome Coppia */}
+            {isCoupleMode && (
+              <div className="animate-fadeIn">
+                <input
+                  type="text"
+                  value={coupleName}
+                  onChange={(e) => setCoupleName(e.target.value)}
+                  placeholder="Nome del tuo complice..."
+                  className="w-full bg-[#1F2937]/40 border border-zinc-800 rounded-[18px] px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:border-[#FFCC00]/50 transition-all text-[14px]"
+                />
+              </div>
+            )}
+          </div>
+
+          {/* LE 3 CARD POV */}
+          <div className="flex-1 flex flex-col justify-center animate-fadeIn delay-300 mt-4 mb-4">
+            <div className="grid grid-cols-2 gap-3 h-full max-h-[190px]">
+              {currentSuggestions.slice(0, 3).map((suggestion, index) => (
+                <button
+                  key={`${isCoupleMode ? 'couple' : 'single'}-${suggestion.id}`}
+                  onClick={() => handlePillClick(suggestion.text, suggestion.id)}
+                  className={`group relative flex flex-col justify-center items-center p-3 bg-[#1F2937]/40 backdrop-blur-md rounded-[24px] border border-transparent transition-all duration-300 overflow-hidden text-center hover:shadow-[0_0_15px_rgba(255,204,0,0.4)] hover:border-[#FFCC00]/50 ${
+                    index === 2 ? 'col-span-2' : 'col-span-1'
+                  } ${
+                    selectedId === suggestion.id 
+                    ? 'shadow-[0_0_15px_rgba(255,204,0,0.6)] border-[#FFCC00] bg-[#1F2937]/70' 
+                    : ''
+                  }`}
+                >
+                  <span className="absolute top-2 right-3 text-[18px] drop-shadow-lg group-hover:scale-110 transition-transform opacity-50 group-hover:opacity-100">
+                    {suggestion.emoji}
+                  </span>
+                  <p className={`text-[11px] font-medium leading-[1.4] w-full px-2 mt-3 line-clamp-3 ${selectedId === suggestion.id ? 'text-[#FFCC00]' : 'text-gray-300'}`}>
+                    {suggestion.text.replace('POV:', '').trim()}
+                  </p>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* TASTO GENERA (Più piccolo e alzato) */}
+          <div className="flex-shrink-0 flex flex-col items-center pb-10 pt-2 relative z-20">
+            {/* Messaggi di Errore */}
+            <div className="absolute bottom-[70px] w-full flex flex-col items-center gap-2 pointer-events-none">
+              {isLimitError && (
+                <div className="bg-red-500/10 border border-red-500/20 text-red-500 px-4 py-2 rounded-xl text-xs font-bold animate-fadeIn">
+                  🚫 Limite giornaliero raggiunto (2/2)
+                </div>
+              )}
+              {showTimeError && (
+                <div className="bg-yellow-500/10 border border-yellow-500/20 text-yellow-500 px-4 py-2 rounded-xl text-xs font-bold animate-fadeIn">
+                  🌙 IA a riposo. Attiva dalle 08:00 alle 23:00
+                </div>
+              )}
+              {showAuthPrompt && (
+                <div className="bg-[#FFCC00] text-black px-4 py-2 rounded-xl text-xs font-bold shadow-[0_0_15px_rgba(255,204,0,0.5)] animate-fadeIn">
+                  Effettua il login per creare!
+                </div>
+              )}
+            </div>
+
+            <button
+              onClick={handleGenerateFilm}
+              disabled={isGenerating}
+              className={`w-[85%] relative inline-flex items-center justify-center h-[48px] bg-[#FFCC00] text-[#000000] font-extrabold text-[13px] tracking-widest rounded-[18px] transition-all duration-300 disabled:cursor-not-allowed ${
+                isGenerating 
+                  ? 'opacity-70 cursor-wait' 
+                  : isPromptReady 
+                    ? 'opacity-100 shadow-[0_0_20px_rgba(255,204,0,0.5)] animate-pulse-glow hover:scale-[1.02] active:scale-[0.98]' 
+                    : 'opacity-40'
+              }`}
+            >
+              {isGenerating ? (
+                <>
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-black mr-2 relative z-10"></div>
+                  <span className="relative z-10 text-[12px] normal-case">{LOADING_MESSAGES[loadingMessageIndex]}</span>
+                </>
+              ) : (
+                <>
+                  <Film className="w-4 h-4 mr-2 relative z-10" />
+                  <span className="relative z-10 font-sans tracking-wide">GENERA FILM</span>
+                  {isPromptReady && <Sparkles className="w-4 h-4 ml-2 relative z-10" />}
+                </>
+              )}
+            </button>
+          </div>
+
+        </div>
+      </div>
+
+      <style jsx global>{`
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+        
+        body {
+          font-family: 'Inter', sans-serif;
+        }
+
+        @keyframes floating {
+          0% { transform: translateY(0px); }
+          50% { transform: translateY(-3px); }
+          100% { transform: translateY(0px); }
+        }
+        .animate-floating {
+          animation: floating 3s ease-in-out infinite;
+        }
+
+        @keyframes pulse-glow {
+          0%, 100% { box-shadow: 0 0 10px rgba(255,204,0,0.3); transform: scale(1); }
+          50% { box-shadow: 0 0 20px rgba(255,204,0,0.6); transform: scale(1.02); }
+        }
+        .animate-pulse-glow {
+          animation: pulse-glow 2s infinite ease-in-out;
+        }
+      `}</style>
+    </PageBackground>
+  );
+}

@@ -1,0 +1,130 @@
+@import "tailwindcss";
+
+/* Design Cinema Scuola: Sempre Oro/Nero */
+:root {
+  --background: #000000;
+  --foreground: #ffffff;
+  --accent-gold: #fbbf24;
+}
+
+/* ========================================
+   NATIVE APP FIXED LAYOUT
+   ======================================== */
+
+/* Body Lock: Elimina scrolling indesiderato e bounce iOS/Android */
+html, body {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  position: fixed;
+  overscroll-behavior: none; /* Previene bounce scrolling */
+  -webkit-overflow-scrolling: auto; /* Disabilita momentum scrolling globale */
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Arial, Helvetica, sans-serif;
+  touch-action: manipulation; /* Previene zoom accidentale su doppio tap */
+  -webkit-tap-highlight-color: transparent; /* Rimuove highlight blu su iOS */
+  -webkit-touch-callout: none; /* Disabilita callout su long-press iOS */
+  user-select: none; /* Previene selezione testo accidentale */
+}
+
+/* Supporto per input/textarea (deve permettere selezione) */
+input, textarea, [contenteditable] {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+/* BLOCCO ZOOM MOBILE: Font size minimo 16px per prevenire auto-zoom iOS/Android */
+input, textarea, select {
+  font-size: 16px !important; /* Minimo 16px per iOS/Android */
+  touch-action: manipulation; /* Previene zoom su doppio tap */
+}
+
+/* Previene zoom su focus per input con font-size < 16px */
+@media screen and (max-width: 767px) {
+  input, textarea, select {
+    font-size: 16px !important;
+  }
+}
+
+/* Scrollable Content: Solo contenitori interni scrollano */
+.scrollable-content {
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch; /* Smooth scrolling iOS */
+  overscroll-behavior-y: contain; /* Previene propagazione scroll */
+  height: 100%;
+}
+
+/* Gradiente radiale personalizzato per l'effetto cinematografico */
+.bg-gradient-radial {
+  background: radial-gradient(circle at center, var(--tw-gradient-from), var(--tw-gradient-via), var(--tw-gradient-to));
+}
+
+/* Animazione fadeIn per transizioni fluide */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fadeIn {
+  animation: fadeIn 0.3s ease-out;
+}
+
+/* Animazione shake per campi con errore */
+@keyframes shake {
+  0%, 100% {
+    transform: translateX(0);
+  }
+  10%, 30%, 50%, 70%, 90% {
+    transform: translateX(-10px);
+  }
+  20%, 40%, 60%, 80% {
+    transform: translateX(10px);
+  }
+}
+
+.animate-shake {
+  animation: shake 0.6s ease-in-out;
+}
+
+/* Animazione logo splash screen */
+@keyframes scaleUpLogo {
+  0% {
+    transform: scale(0.8);
+    opacity: 0;
+  }
+  50% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.animate-scaleUpLogo {
+  animation: scaleUpLogo 1.2s ease-out;
+}
+
+/* Nasconde scrollbar per highlights Instagram-style */
+.scrollbar-hide {
+  -ms-overflow-style: none;  /* IE and Edge */
+  scrollbar-width: none;  /* Firefox */
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;  /* Chrome, Safari, Opera */
+}
