@@ -64,6 +64,31 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased bg-black`}
       >
+        {/* LOGICA "CALAMITA": 
+            Questo script viene eseguito immediatamente al caricamento del browser.
+            Controlla se c'è un video in sospeso (pending_production) creato nell'ultima ora.
+            MODIFICA: Escludiamo esplicitamente la pagina /crea per evitare conflitti durante la generazione.
+        */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              (function() {
+                try {
+                  const pending = localStorage.getItem('pending_production');
+                  const path = window.location.pathname;
+                  if (pending && !path.startsWith('/finalizzazione') && !path.startsWith('/crea')) {
+                    const data = JSON.parse(pending);
+                    // Controlliamo che la sessione sia "fresca" (creata meno di 1 ora fa)
+                    const isFresh = Date.now() - data.timestamp < 1000 * 60 * 60;
+                    if (isFresh && data.category) {
+                      window.location.href = '/finalizzazione?category=' + data.category;
+                    }
+                  }
+                } catch (e) {}
+              })();
+            `,
+          }}
+        />
         <PWARegister />
         <ActivityTracker />
         <LayoutWrapper>{children}</LayoutWrapper>

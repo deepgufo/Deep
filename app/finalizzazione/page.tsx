@@ -21,20 +21,11 @@ export default async function FinalizzazionePage(props: {
   const rawPrompt = searchParams.prompt || searchParams.trauma || "Il mio Film";
   const displayPrompt = decodeURIComponent(rawPrompt).replace(/\+/g, ' ');
 
-  // 4. Controllo di sicurezza Server-Side
-  if (!videoUrl) {
-    return (
-      <div className="h-screen bg-black flex items-center justify-center text-white p-10 text-center">
-        <div className="flex flex-col gap-4">
-          <p className="text-xl font-bold">🎬 Parametri mancanti</p>
-          <p className="text-gray-400">Non abbiamo trovato il video da elaborare.</p>
-          <a href="/crea" className="mt-4 px-6 py-3 bg-yellow-400 text-black font-bold rounded-xl">
-            Torna alla creazione
-          </a>
-        </div>
-      </div>
-    );
-  }
+  // 4. LOGICA AGGIORNATA: Rimozione del blocco Server-Side
+  // Non blocchiamo più l'esecuzione qui con il return del div "Parametri mancanti".
+  // Permettiamo a FinalizzazioneClient di montarsi; se videoUrl è vuoto nell'URL,
+  // il componente Client cercherà di recuperare la sessione o l'ID dal localStorage.
+  // Questo evita la schermata nera fissa quando l'URL viene "pulito" dal browser o dai redirect.
 
   return (
     <FinalizzazioneClient 
