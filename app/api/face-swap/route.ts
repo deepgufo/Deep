@@ -3,6 +3,9 @@ import Replicate from "replicate";
 import { supabaseAdmin } from "@/lib/supabase";
 import { createClient } from "@supabase/supabase-js";
 
+// Forza Vercel a non cachare le risposte di questa API
+export const dynamic = 'force-dynamic';
+
 export async function POST(req: Request) {
   try {
     const replicate = new Replicate({
@@ -148,7 +151,17 @@ export async function GET(req: Request) {
   try {
     const prediction = await replicate.predictions.get(id);
     console.log(`Polling ID ${id.slice(-5)}: ${prediction.status}`);
-    return NextResponse.json(prediction);
+    
+    // Ritorna la predizione con header anti-cache per evitare il blocco al 98%
+    return new NextResponse(JSON.stringify(prediction), {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0',
+      },
+    });
   } catch (error: any) {
    
     try {
