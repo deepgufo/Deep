@@ -157,7 +157,8 @@ export default function FinalizzazioneClient({
 
         pollInterval = setInterval(async () => {
           try {
-            const checkRes = await fetch(`/api/face-swap?id=${predictionId}`);
+            // AGGIUNTO CACHE BUSTER (&t=...) per forzare il browser a chiedere dati freschi
+            const checkRes = await fetch(`/api/face-swap?id=${predictionId}&t=${Date.now()}`);
             if (!checkRes.ok) {
                 const errData = await checkRes.json();
                 throw new Error(errData.error || "Errore di connessione al server.");
