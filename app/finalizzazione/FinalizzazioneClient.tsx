@@ -29,6 +29,7 @@ export default function FinalizzazioneClient({
   const [showIcon, setShowIcon] = useState(false);
   const [finalVideoUrl, setFinalVideoUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [username, setUsername] = useState<string>('');
 
   // Gestiamo il videoUrl internamente per permettere il recupero da localStorage
   const [currentVideoUrl, setCurrentVideoUrl] = useState(propVideoUrl);
@@ -65,36 +66,50 @@ export default function FinalizzazioneClient({
     }
   };
 
+  // --- RECUPERO USERNAME ---
+  useEffect(() => {
+    const fetchUsername = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        const { data } = await supabase
+          .from('profiles')
+          .select('username')
+          .eq('id', user.id)
+          .single();
+        if (data?.username) {
+          setUsername(data.username);
+        }
+      }
+    };
+    fetchUsername();
+  }, []);
+
   // --- LOGICA DI PERSISTENZA ---
   useEffect(() => {
     if (propVideoUrl && propVideoUrl !== "undefined" && propVideoUrl !== "") {
       const sessionData = {
         videoUrl: propVideoUrl,
-        finalVideoUrl: finalVideoUrl, // Salviamo il video finale se disponibile
+        finalVideoUrl: finalVideoUrl, 
         initialPrompt,
         category,
         timestamp: Date.now()
       };
       localStorage.setItem('pending_production', JSON.stringify(sessionData));
       
-      // Sincronizziamo lo stato del prompt se arriva un valore valido dai props
       if (initialPrompt && initialPrompt !== "Il mio Film") {
         setEditedPrompt(initialPrompt);
       }
     } else {
-      // TENTATIVO DI RECUPERO SE IL SERVER NON CI HA DATO NULLA
       const saved = localStorage.getItem('pending_production');
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Date.now() - parsed.timestamp < 1000 * 60 * 60 * 2) { // 2 ore di validità
+        if (Date.now() - parsed.timestamp < 1000 * 60 * 60 * 2) { 
           setCurrentVideoUrl(parsed.videoUrl);
           
-          // Recupero del testo salvato
           if (parsed.initialPrompt && parsed.initialPrompt !== "") {
             setEditedPrompt(parsed.initialPrompt);
           }
 
-          // RECUPERO VIDEO FINALE: Se il video era già stato generato, caricalo e ferma il caricamento
           if (parsed.finalVideoUrl) {
             setFinalVideoUrl(parsed.finalVideoUrl);
             setIsLoading(false);
@@ -123,7 +138,6 @@ export default function FinalizzazioneClient({
     const startFaceSwap = async () => {
       if (hasStartedRequest.current) return;
 
-      // CONTROLLO ANTI-RITORNO: Se il video finale è già presente (recuperato da localStorage), non avviare nulla
       if (finalVideoUrl) {
         hasStartedRequest.current = true;
         return;
@@ -133,7 +147,6 @@ export default function FinalizzazioneClient({
 
       if (!storedPredictionId) {
         console.log("⏱️ Nessun ID produzione trovato. Attendo o Errore.");
-        // Se non c'è l'ID e non c'è videoUrl, allora siamo davvero persi
         if (!currentVideoUrl) {
            setError("Dati mancanti per avviare la produzione.");
            setIsLoading(false);
@@ -157,7 +170,6 @@ export default function FinalizzazioneClient({
 
         pollInterval = setInterval(async () => {
           try {
-            // AGGIUNTO CACHE BUSTER (&t=...) per forzare il browser a chiedere dati freschi
             const checkRes = await fetch(`/api/face-swap?id=${predictionId}&t=${Date.now()}`);
             if (!checkRes.ok) {
                 const errData = await checkRes.json();
@@ -191,7 +203,6 @@ export default function FinalizzazioneClient({
               });
             }
           } catch (pollErr: any) {
-             // CATTURIAMO TUTTI GLI ERRORI, non solo quelli con "fallita"
              console.error("Polling Error:", pollErr);
              setError(pollErr.message);
              clearInterval(pollInterval);
@@ -221,7 +232,7 @@ export default function FinalizzazioneClient({
       if (pollInterval) clearInterval(pollInterval); 
       if (msgInterval) clearInterval(msgInterval);
     };
-  }, [currentVideoUrl, finalVideoUrl]); // Aggiunto finalVideoUrl alle dipendenze per bloccare startFaceSwap se recuperato
+  }, [currentVideoUrl, finalVideoUrl]); 
 
   const handlePublishAction = async (status: 'pubblico' | 'privato') => {
     if (!finalVideoUrl) return;
@@ -303,16 +314,74 @@ export default function FinalizzazioneClient({
     }
   };
 
+  // --- LOGICA WATERMARK CON USERNAME ---
+  const getWatermarkedBlob = async (videoUrl: string): Promise<Blob> => {
+    return new Promise((resolve, reject) => {
+      const video = document.createElement('video');
+      video.src = videoUrl;
+      video.crossOrigin = 'anonymous';
+      video.muted = true;
+      video.play();
+
+      video.onloadedmetadata = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return reject("Canvas context non disponibile");
+
+        const stream = canvas.captureStream(30);
+        const recorder = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp9' });
+        const chunks: Blob[] = [];
+
+        recorder.ondataavailable = (e) => chunks.push(e.data);
+        recorder.onstop = () => resolve(new Blob(chunks, { type: 'video/mp4' }));
+
+        recorder.start();
+
+        const drawFrame = () => {
+          if (video.ended || video.paused) {
+            recorder.stop();
+            return;
+          }
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+          
+          // Ombra per rendere il testo leggibile su ogni sfondo
+          ctx.shadowColor = "rgba(0,0,0,0.5)";
+          ctx.shadowBlur = 10;
+
+          // DISEGNO WATERMARK "DEEP"
+          ctx.font = `bold ${canvas.width * 0.05}px sans-serif`;
+          ctx.fillStyle = "#FFCC00";
+          ctx.textAlign = "right";
+          ctx.fillText("DEEP", canvas.width - 25, canvas.height - 55);
+          
+          // DISEGNO @USERNAME
+          ctx.font = `bold ${canvas.width * 0.035}px sans-serif`;
+          ctx.fillStyle = "rgba(255, 255, 255, 0.9)";
+          ctx.fillText(`@${username || 'user'}`, canvas.width - 25, canvas.height - 25);
+          
+          requestAnimationFrame(drawFrame);
+        };
+
+        drawFrame();
+      };
+      
+      video.onerror = () => reject("Errore caricamento video per watermark");
+    });
+  };
+
   const handleDownloadVideo = async () => {
     trackSatisfactionEvent('video_downloaded');
     const targetUrl = finalVideoUrl || currentVideoUrl;
+    if (!targetUrl) return;
+
     try {
-      const response = await fetch(targetUrl);
-      const blob = await response.blob();
+      const blob = await getWatermarkedBlob(targetUrl);
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = `film_${category}_${Date.now()}.mp4`;
+      link.download = `deep_film_${category}.mp4`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -329,21 +398,17 @@ export default function FinalizzazioneClient({
     if (!targetUrl) return;
 
     try {
-      // 1. Scarichiamo il file video per poterlo condividere come FILE reale (WhatsApp, Instagram, etc)
-      const response = await fetch(targetUrl);
-      const blob = await response.blob();
-      const file = new File([blob], `film_${category}.mp4`, { type: 'video/mp4' });
+      const blob = await getWatermarkedBlob(targetUrl);
+      const file = new File([blob], `deep_film_${category}.mp4`, { type: 'video/mp4' });
 
-      // 2. Usiamo navigator.share nativo se disponibile
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
         await navigator.share({
           files: [file],
-          title: 'Guarda il mio film!',
-          text: `Ho creato un film "${editedPrompt}" con Cinema Scuola.`,
+          title: 'Guarda il mio film su Deep!',
+          text: `Ho creato questo film con Cinema Scuola.`,
         });
       } 
       else if (navigator.share) {
-        // Fallback solo link se il browser non supporta l'invio diretto del file
         await navigator.share({
           title: 'Guarda il mio film!',
           url: targetUrl,
@@ -354,7 +419,6 @@ export default function FinalizzazioneClient({
         throw new Error("Condivisione non supportata");
       }
     } catch (err) {
-      // 3. Fallback finale: copia link negli appunti
       try {
         await navigator.clipboard.writeText(targetUrl);
         alert("Link copiato negli appunti! 📋");

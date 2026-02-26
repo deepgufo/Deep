@@ -3,7 +3,7 @@
 import { useState, useMemo, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
-import { Sparkles, Film, Users, Zap, User, RefreshCw, ArrowLeft } from 'lucide-react'; 
+import { Sparkles, Film, Users, Zap, User, RefreshCw } from 'lucide-react'; 
 import PageBackground from '../components/PageBackground';
 
 // TIPO PERSONAGGIO
@@ -54,11 +54,9 @@ export default function CreaPage() {
   const [isCoupleMode, setIsCoupleMode] = useState(false);
   const [coupleName, setCoupleName] = useState('');
 
-  // STATI PER IL LIMITE GIORNALIERO E INVITI
+  // STATI PER IL LIMITE GIORNALIERO
   const [dailyCount, setDailyCount] = useState(0);
   const [isLimitError, setIsLimitError] = useState(false);
-  const [showInvitePopup, setShowInvitePopup] = useState(false);
-  const [lastInviteDate, setLastInviteDate] = useState<string | null>(null);
 
   // NUOVI STATI PER IL PERSONAGGIO E FACCIA
   const [userFace, setUserFace] = useState<string | null>(null);
@@ -100,20 +98,26 @@ export default function CreaPage() {
         
         const { data: profile } = await supabase
           .from('profiles')
-          .select('daily_video_count, last_video_date, ia_face_url, last_invite_date')
+          .select('daily_video_count, last_video_date, ia_face_url')
           .eq('id', session.user.id)
           .single();
 
         // --- FORZATURA NUCLEARE BUCKET ia-faces ---
         if (profile?.ia_face_url) {
+            // Pulizia totale: rimuoviamo link completi o prefissi bucket errati
             const rawValue = profile.ia_face_url;
+            
+            // Estraiamo solo la parte utile del path (es: 'ID/immagine.jpg' o 'immagine.jpg')
             const cleanPath = rawValue
                 .replace(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/avatars/`, '')
                 .replace(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/ia-faces/`, '')
                 .replace('avatars/', '')
                 .replace('ia-faces/', '');
             
+            // Costruiamo l'URL forzando il bucket ia-faces
             const forcedFaceUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/ia-faces/${cleanPath}`;
+            
+            console.log("🚀 URL FACCIA FORZATO:", forcedFaceUrl);
             setUserFace(forcedFaceUrl);
         } else {
             setUserFace(null);
@@ -124,10 +128,6 @@ export default function CreaPage() {
           setDailyCount(profile.daily_video_count || 0);
         } else {
           setDailyCount(0);
-        }
-
-        if (profile?.last_invite_date) {
-          setLastInviteDate(profile.last_invite_date);
         }
       }
     };
@@ -163,58 +163,9 @@ export default function CreaPage() {
     router.push("/crea/personaggi");
   };
 
-  // LOGICA RESET ORE 08:00 PER INVITO
-  const canUseInvite = useMemo(() => {
-    if (!lastInviteDate) return true;
-    
-    const now = new Date();
-    const lastInvite = new Date(lastInviteDate);
-    
-    // Calcoliamo l'ultimo reset point (le 8 di stamattina o di ieri)
-    const lastReset = new Date();
-    lastReset.setHours(8, 0, 0, 0);
-    
-    if (now < lastReset) {
-      // Se non sono ancora le 8, il reset valido è quello di ieri alle 8
-      lastReset.setDate(lastReset.getDate() - 1);
-    }
-    
-    return lastInvite < lastReset;
-  }, [lastInviteDate]);
-
-  const handleInviteAction = async () => {
-    if (!canUseInvite) {
-      alert("Hai già sbloccato i video per oggi! Torna domani dopo le 08:00.");
-      return;
-    }
-
-    const message = "sei stato invitato ad unirti a deep, o ne vuoi restare furoi?";
-    window.open(`https://wa.me/?text=${encodeURIComponent(message)}`, '_blank');
-
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        const { error } = await supabase
-          .from('profiles')
-          .update({ 
-            daily_video_count: 2, 
-            last_invite_date: new Date().toISOString() 
-          })
-          .eq('id', user.id);
-        
-        if (!error) {
-          setDailyCount(2);
-          setLastInviteDate(new Date().toISOString());
-          setShowInvitePopup(false);
-        }
-      }
-    } catch (err) {
-      console.error("Errore sblocco:", err);
-    }
-  };
-
   // --- LOGICA DI GENERAZIONE ---
   const handleGenerateFilm = async () => {
+    // Recupero sessione fresca
     const { data: { session } } = await supabase.auth.getSession();
     const { data: { user } } = await supabase.auth.getUser();
 
@@ -224,9 +175,10 @@ export default function CreaPage() {
       return;
     }
 
-    // CONTROLLO LIMITE VIDEO (3/3)
+    // 2. CONTROLLO LIMITE VIDEO (3/3)
     if (dailyCount >= 3) {
-      setShowInvitePopup(true);
+      setIsLimitError(true);
+      setTimeout(() => setIsLimitError(false), 2000);
       return;
     }
 
@@ -252,6 +204,7 @@ export default function CreaPage() {
     }
 
     try {
+      // Pulizia sessioni pendenti per evitare conflitti con il redirect del layout
       localStorage.removeItem('pending_production');
       localStorage.removeItem('predictionId');
 
@@ -259,6 +212,7 @@ export default function CreaPage() {
 
       const targetVideoUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/video-clips/${selectedChar.video_url}`;
 
+      // --- CHIAMATA API BLINDATA ---
       const response = await fetch("/api/face-swap", {
         method: "POST",
         headers: { 
@@ -267,15 +221,19 @@ export default function CreaPage() {
         },
         body: JSON.stringify({
           videoUrl: targetVideoUrl,
-          faceUrl: userFace,
+          faceUrl: userFace, // URL forzato su ia-faces
           prompt: prompt,
           userId: user.id
         }),
       });
 
       const data = await response.json();
+
       if (!response.ok) throw new Error(data.error || "Errore generazione");
 
+      // --- MODIFICA FONDAMENTALE: SALVATAGGIO SESSIONE PER RECUPERO ---
+      // Salviamo i dati della produzione imminente prima del redirect.
+      // Questo permette a FinalizzazioneClient di funzionare anche se l'URL perde parametri.
       const sessionData = {
         videoUrl: targetVideoUrl,
         initialPrompt: prompt,
@@ -283,10 +241,12 @@ export default function CreaPage() {
         timestamp: Date.now()
       };
       localStorage.setItem('pending_production', JSON.stringify(sessionData));
+      // ---------------------------------------------------------------
 
       localStorage.removeItem("tempPrompt");
       localStorage.setItem("predictionId", data.id);
       
+      // MODIFICA: Aggiunto prompt nell'URL per sincronizzazione immediata
       router.push(`/finalizzazione?category=${selectedChar.tag.replace('#','')}&prompt=${encodeURIComponent(prompt)}`);
 
     } catch (error) {
@@ -310,7 +270,7 @@ export default function CreaPage() {
 
   return (
     <PageBackground>
-      <div className={`h-[100dvh] w-full bg-[#0A0A0A] text-white font-sans overflow-hidden flex flex-col px-4 pt-10 pb-6 relative transition-all duration-500 ${showInvitePopup ? 'blur-xl scale-[0.95]' : ''}`}>
+      <div className="h-[100dvh] w-full bg-[#0A0A0A] text-white font-sans overflow-hidden flex flex-col px-4 pt-10 pb-6 relative">
         
         <div className="absolute top-[-10%] left-[-10%] w-[50vw] h-[50vw] bg-[#2A0845] opacity-20 rounded-full blur-[100px] pointer-events-none" />
         <div className="absolute bottom-[10%] right-[-10%] w-[60vw] h-[60vw] bg-[#001B3A] opacity-30 rounded-full blur-[120px] pointer-events-none" />
@@ -442,7 +402,7 @@ export default function CreaPage() {
               className={`w-[85%] relative inline-flex items-center justify-center h-[48px] bg-[#FFCC00] text-[#000000] font-extrabold text-[13px] tracking-widest rounded-[18px] transition-all duration-300 disabled:cursor-not-allowed ${
                 isGenerating 
                   ? 'opacity-70 cursor-wait' 
-                  : (isPromptReady || dailyCount >= 3)
+                  : isPromptReady 
                     ? 'opacity-100 shadow-[0_0_20px_rgba(255,204,0,0.5)] animate-pulse-glow hover:scale-[1.02] active:scale-[0.98]' 
                     : 'opacity-40'
               }`}
@@ -460,9 +420,9 @@ export default function CreaPage() {
                       <User className="w-4 h-4 mr-2 relative z-10" />
                   )}
                   <span className="relative z-10 font-sans tracking-wide">
-                      {dailyCount >= 3 ? 'SBLOCCA VIDEO' : selectedChar ? 'GENERA FILM' : 'SCEGLI PERSONAGGIO'}
+                      {selectedChar ? 'GENERA FILM' : 'SCEGLI PERSONAGGIO'}
                   </span>
-                  {(isPromptReady && dailyCount < 3) && <Sparkles className="w-4 h-4 ml-2 relative z-10" />}
+                  {isPromptReady && <Sparkles className="w-4 h-4 ml-2 relative z-10" />}
                 </>
               )}
             </button>
@@ -471,61 +431,11 @@ export default function CreaPage() {
         </div>
       </div>
 
-      {/* POP-UP INVITO AMICO (BOTTOM SHEET) */}
-      {showInvitePopup && (
-        <div className="fixed inset-0 z-[100] flex items-end justify-center">
-          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowInvitePopup(false)} />
-          
-          <div className="relative w-full max-w-md bg-[#1A1A1A] border-t border-[#FFCC00]/40 rounded-t-[40px] px-8 pt-16 pb-12 shadow-[0_-20px_50px_rgba(0,0,0,1)] animate-slideUp">
-            
-            <button 
-              onClick={() => setShowInvitePopup(false)}
-              className="absolute top-6 left-8 text-gray-500 hover:text-white transition-colors"
-            >
-              <ArrowLeft className="w-6 h-6" />
-            </button>
-
-            <div className="text-center space-y-6">
-              <div className="inline-flex p-4 bg-[#FFCC00]/10 rounded-full border border-[#FFCC00]/20">
-                <Zap className="w-8 h-8 text-[#FFCC00]" />
-              </div>
-
-              <div className="space-y-2">
-                <h3 className="text-2xl font-black text-white uppercase italic tracking-tighter">Set al completo!</h3>
-                <p className="text-zinc-400 text-sm font-medium leading-relaxed">
-                  Invita un amico sul set per sbloccare altri <span className="text-[#FFCC00]">2 video gratis</span> e continuare a girare.
-                </p>
-              </div>
-
-              <div className="pt-4">
-                <button
-                  onClick={handleInviteAction}
-                  className="w-full py-5 border-2 border-[#FFCC00] text-[#FFCC00] font-black rounded-2xl active:scale-95 transition-all shadow-[0_0_30px_rgba(255,204,0,0.1)] uppercase tracking-widest text-sm"
-                >
-                  Invita un amico
-                </button>
-                <p className="mt-6 text-[10px] font-bold text-zinc-600 uppercase tracking-[0.2em]">
-                  Il reset avviene ogni mattina alle 08:00
-                </p>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
       <style jsx global>{`
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
         
         body {
           font-family: 'Inter', sans-serif;
-        }
-
-        @keyframes slideUp {
-          from { transform: translateY(100%); }
-          to { transform: translateY(0); }
-        }
-        .animate-slideUp {
-          animation: slideUp 0.5s cubic-bezier(0.16, 1, 0.3, 1);
         }
 
         @keyframes floating {
