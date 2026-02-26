@@ -188,7 +188,7 @@ export default function CreaPage() {
       return;
     }
 
-    const message = "sei stato invitato ad unirti a deep, o ne vuoi restare furoi?";
+    const message = "sei stato invitato ad unirti a deep, o ne vuoi restare furoi? https://deepfly.app/feed";
     window.open(`https://wa.me/?text=${encodeURIComponent(message)}`, '_blank');
 
     try {

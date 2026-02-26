@@ -25,6 +25,7 @@ export const viewport: Viewport = {
 };
 
 export const metadata: Metadata = {
+  metadataBase: new URL('https://deepfly.app'),
   title: "Deep - Diventa il protagonista",
   description: "Trasforma i tuoi momenti a scuola in scene da film con l'IA",
   manifest: "/manifest.json",
@@ -32,6 +33,22 @@ export const metadata: Metadata = {
     capable: true,
     statusBarStyle: "black-translucent",
     title: "Deep",
+  },
+  openGraph: {
+    title: "Deep - Trasforma i tuoi POV in Cinema",
+    description: "Sei stato invitato ad unirti a Deep!",
+    url: "https://deepfly.app/feed",
+    siteName: "Deep",
+    images: [
+      {
+        url: "/logo_01.png",
+        width: 1200,
+        height: 630,
+        alt: "Deep Logo",
+      },
+    ],
+    locale: "it_IT",
+    type: "website",
   },
 };
 
