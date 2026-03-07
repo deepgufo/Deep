@@ -36,6 +36,7 @@ interface Video {
   video_url: string;
   caption: string; // MODIFICATO: Allineato a colonna database
   oscar_count: number; 
+  has_user_liked?: boolean; // Aggiunto per gestione Oscar
   created_at: string;
 }
 
@@ -92,7 +93,7 @@ export default function PublicProfilePage() {
         
         setProfile(profileRes);
 
-        // MODIFICA: Carica video usando 'caption' invece di 'prompt'
+        // Carica video pubblici
         const { data: videoRes, error: vError } = await supabase
           .from('public_videos')
           .select('id, video_url, caption, oscar_count, created_at')
@@ -102,7 +103,21 @@ export default function PublicProfilePage() {
         if (vError) {
           console.error('❌ Errore caricamento video:', vError);
         } else {
-          setVideos(videoRes || []);
+          // MODIFICA: Controlliamo se l'utente loggato ha messo like a questi video
+          const videosWithLikes = await Promise.all((videoRes || []).map(async (v) => {
+            let hasUserLiked = false;
+            if (loggedUserId) {
+              const { data: likeData } = await supabase
+                .from('likes')
+                .select('id')
+                .eq('film_id', v.id)
+                .eq('user_id', loggedUserId)
+                .maybeSingle();
+              hasUserLiked = !!likeData;
+            }
+            return { ...v, has_user_liked: hasUserLiked };
+          }));
+          setVideos(videosWithLikes);
         }
 
         // Conta follower totali
@@ -210,6 +225,59 @@ export default function PublicProfilePage() {
     }
   };
 
+  // --- GESTIONE OSCAR (LIKE) ---
+  const handleOscarToggle = async (postId: string) => {
+    if (!currentUserId) {
+      alert('Devi effettuare il login per mettere l\'Oscar!');
+      router.push('/auth');
+      return;
+    }
+
+    const post = videos.find((v) => v.id === postId);
+    if (!post) return;
+
+    const wasLiked = post.has_user_liked;
+    
+    // Aggiornamento ottimistico
+    setVideos((prev) =>
+      prev.map((v) =>
+        v.id === postId
+          ? {
+              ...v,
+              has_user_liked: !wasLiked,
+              oscar_count: wasLiked ? v.oscar_count - 1 : v.oscar_count + 1
+            }
+          : v
+      )
+    );
+
+    try {
+      const { data, error } = await supabase.rpc('toggle_oscar', { 
+        target_video_id: postId 
+      });
+
+      if (error) throw error;
+
+      if (data && typeof data.new_count === 'number') {
+        setVideos((prev) =>
+          prev.map((v) =>
+            v.id === postId ? { ...v, oscar_count: data.new_count } : v
+          )
+        );
+      }
+    } catch (error) {
+      console.error('❌ Errore Oscar:', error);
+      // Rollback
+      setVideos((prev) =>
+        prev.map((v) =>
+          v.id === postId
+            ? { ...v, has_user_liked: wasLiked, oscar_count: wasLiked ? v.oscar_count + 1 : v.oscar_count - 1 }
+            : v
+        )
+      );
+    }
+  };
+
   // --- GESTIONE VIDEO ---
   const toggleVideoPlayback = (id: string) => {
     const video = videoRefs.current[id];
@@ -251,47 +319,6 @@ export default function PublicProfilePage() {
         newSet.add(videoId);
         return newSet;
       });
-    }
-  };
-
-  // --- ELIMINAZIONE VIDEO (Solo proprietario) ---
-  const handleDeleteVideo = async (videoId: string) => {
-    if (!currentUserId || currentUserId !== profile?.id) {
-      alert('Non hai i permessi per eliminare questo video');
-      return;
-    }
-
-    const confirmDelete = confirm('Sei sicuro di voler eliminare questo video? L\'azione è irreversibile.');
-    if (!confirmDelete) return;
-
-    try {
-      // Elimina da Supabase
-      const { error } = await supabase
-        .from('public_videos')
-        .delete()
-        .eq('id', videoId)
-        .eq('user_id', currentUserId); // Sicurezza extra
-
-      if (error) throw error;
-
-      // Aggiorna stato locale
-      setVideos((prev) => prev.filter((v) => v.id !== videoId));
-      
-      // Se era l'ultimo video, chiudi overlay
-      if (videos.length === 1) {
-        closeFeedView();
-      } else if (selectedVideoIndex !== null && selectedVideoIndex >= videos.length - 1) {
-        // Se era l'ultimo della lista, vai al precedente
-        setSelectedVideoIndex(videos.length - 2);
-      }
-
-      setFeedbackMessage({ type: 'success', text: 'Video eliminato con successo' });
-      setTimeout(() => setFeedbackMessage(null), 2500);
-
-    } catch (error) {
-      console.error('❌ Errore eliminazione video:', error);
-      setFeedbackMessage({ type: 'error', text: 'Errore durante l\'eliminazione' });
-      setTimeout(() => setFeedbackMessage(null), 3000);
     }
   };
 
@@ -409,7 +436,6 @@ export default function PublicProfilePage() {
             <div className="flex items-center gap-3 mb-6">
               <span className="text-zinc-400 text-sm">@{profile.username}</span>
               <div className="w-px h-4 bg-zinc-700"></div>
-              {/* MODIFICATA LOGICA VISUALIZZAZIONE GENERE */}
               <span className="text-zinc-500 text-sm capitalize">{profile.gender || 'Attrice'}</span>
             </div>
 
@@ -532,10 +558,9 @@ export default function PublicProfilePage() {
           </div>
         </section>
 
-        {/* FEED OVERLAY FULLSCREEN */}
+        {/* FEED OVERLAY FULLSCREEN - DESIGN FEED COPIATO E MIGLIORATO PER POV VISIBILITY */}
         {selectedVideoIndex !== null && videos[selectedVideoIndex] && (
           <div className="fixed inset-0 z-[2000] bg-black flex items-center justify-center">
-            {/* CLOSE BUTTON */}
             <button
               onClick={closeFeedView}
               className="absolute top-4 left-4 z-[2010] w-10 h-10 rounded-full bg-white/10 backdrop-blur-md border border-white/20 flex items-center justify-center hover:bg-white/20 transition-all"
@@ -543,63 +568,34 @@ export default function PublicProfilePage() {
               <X className="w-5 h-5 text-white" />
             </button>
 
-            {/* VIDEO FEED STYLE */}
-            <div className="relative w-full h-full max-w-[390px] mx-auto flex flex-col bg-black">
+            {/* Container principale alzato per non finire sotto la bottom-nav dello smartphone */}
+            <div className="relative w-full h-full max-w-[390px] mx-auto flex flex-col bg-black pb-[80px]">
               
-              {/* BARRA SUPERIORE - INFO UTENTE (70px) */}
+              {/* HEADER UTENTE (70px) */}
               <div className="h-[70px] bg-black flex items-center px-4 flex-shrink-0">
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    closeFeedView();
-                    router.push(`/users/${profile?.id}`);
-                  }}
-                  className="flex items-center gap-3"
-                >
-                  <div className="w-11 h-11 rounded-full overflow-hidden border-[1.5px] border-white/80">
-                    {profile?.avatar_url ? (
-                      <Image
-                        src={profile.avatar_url}
-                        alt={profile.full_name}
-                        width={44}
-                        height={44}
-                        className="w-full h-full object-cover"
-                      />
-                    ) : (
-                      <div className="w-full h-full bg-zinc-800 flex items-center justify-center">
-                        <UserIcon className="w-6 h-6 text-zinc-400" />
-                      </div>
-                    )}
+                <div className="flex items-center gap-3">
+                  <div className="w-11 h-11 rounded-full overflow-hidden border border-white/80">
+                    {profile.avatar_url && <Image src={profile.avatar_url} alt="av" width={44} height={44} className="object-cover" />}
                   </div>
                   <div>
-                    <p className="text-white font-semibold text-base">
-                      @{profile?.username}
-                    </p>
-                    <p className="text-[#D4AF37] font-bold text-xs tracking-wide">
-                      REGISTA
-                    </p>
+                    <p className="text-white font-semibold text-base">@{profile.username}</p>
+                    <p className="text-[#D4AF37] font-bold text-xs tracking-wide">REGISTA</p>
                   </div>
-                </button>
+                </div>
               </div>
 
-              {/* CORPO CENTRALE - VIDEO (flex-1) */}
+              {/* AREA VIDEO - RIDOTTA PER LASCIARE SPAZIO AL POV (flex-1) */}
               <div 
-                className="relative flex-1 w-full overflow-hidden border-y-[0.5px] border-white/5 bg-black cursor-pointer"
+                className="relative flex-1 w-full flex items-center justify-center bg-black cursor-pointer overflow-hidden border-y-[0.5px] border-white/5" 
                 onClick={() => handleFeedVideoClick(videos[selectedVideoIndex].id)}
               >
-                {/* VIDEO PLAYER */}
                 <video
-                  ref={(el) => {
-                    feedVideoRefs.current[videos[selectedVideoIndex].id] = el;
-                  }}
+                  ref={(el) => { feedVideoRefs.current[videos[selectedVideoIndex].id] = el; }}
                   src={videos[selectedVideoIndex].video_url}
-                  className="w-full h-full object-cover"
-                  loop
-                  playsInline
-                  autoPlay
+                  className="max-h-full w-auto object-contain"
+                  loop playsInline autoPlay
                 />
 
-                {/* ICONA PLAY QUANDO PAUSATO */}
                 {pausedVideos.has(videos[selectedVideoIndex].id) && (
                   <div className="absolute inset-0 flex items-center justify-center z-30 bg-black/20">
                     <div className="w-16 h-16 flex items-center justify-center rounded-full bg-white/20 backdrop-blur-md">
@@ -608,62 +604,36 @@ export default function PublicProfilePage() {
                   </div>
                 )}
 
-                {/* MENU 3 PUNTINI - ALTO DESTRA */}
-                <div className="absolute top-3 right-3 z-40">
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      alert('Menu in sviluppo');
-                    }}
-                    className="w-8 h-8 flex items-center justify-center hover:scale-110 transition-transform"
+                {/* SIDEBAR INTERAZIONI (DESTRA) */}
+                <div className="absolute bottom-4 right-4 flex flex-col items-center gap-6 z-40">
+                  
+                  {/* OSCAR INTERATTIVO */}
+                  <button 
+                    onClick={(e) => { e.stopPropagation(); handleOscarToggle(videos[selectedVideoIndex].id); }}
+                    className="flex flex-col items-center gap-1 group active:scale-110 transition-transform"
                   >
-                    <MoreVertical className="w-5 h-5 text-white drop-shadow-[0_2px_8px_rgba(0,0,0,0.9)]" />
-                  </button>
-                </div>
-
-                {/* ICONE INTERAZIONE - DESTRA BASSO */}
-                <div className="absolute bottom-10 right-4 flex flex-col items-center gap-4 z-40">
-                  {/* TRASH - SOLO PROPRIETARIO */}
-                  {currentUserId === profile?.id && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleDeleteVideo(videos[selectedVideoIndex].id);
-                      }}
-                      className="flex flex-col items-center gap-1 group"
-                    >
-                      <div className="w-12 h-12 rounded-full bg-red-500/80 backdrop-blur-md flex items-center justify-center group-hover:scale-110 transition-transform">
-                        <Trash2 className="w-5 h-5 text-white" />
-                      </div>
-                    </button>
-                  )}
-
-                  {/* OSCAR/LIKE COUNT */}
-                  <div className="flex flex-col items-center gap-1">
-                    <div className="text-3xl">🏆</div>
-                    <span className="text-xs font-bold text-[#D4AF37] drop-shadow-[0_2px_8px_rgba(0,0,0,0.9)]">
+                    <div className={`text-3xl transition-all ${videos[selectedVideoIndex].has_user_liked ? 'drop-shadow-[0_0_12px_rgba(212,175,55,1)] scale-125' : 'grayscale opacity-70 group-hover:grayscale-0 group-hover:opacity-100'}`}>
+                      🏆
+                    </div>
+                    <span className={`text-xs font-bold drop-shadow-[0_2px_8px_rgba(0,0,0,0.9)] ${videos[selectedVideoIndex].has_user_liked ? 'text-[#D4AF37]' : 'text-white'}`}>
                       {videos[selectedVideoIndex].oscar_count || 0}
                     </span>
-                  </div>
+                  </button>
 
-                  {/* CONDIVIDI */}
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleShare(videos[selectedVideoIndex]);
-                    }}
-                    className="group"
-                  >
+                  <button onClick={(e) => { e.stopPropagation(); handleShare(videos[selectedVideoIndex]); }}>
                     <Share2 className="w-6 h-6 text-white drop-shadow-[0_2px_8px_rgba(0,0,0,0.9)] group-hover:scale-110 transition-transform" />
                   </button>
                 </div>
               </div>
 
-              {/* BARRA INFERIORE - TITOLO VIDEO (60px) */}
-              <div className="h-[60px] bg-black flex items-center px-4 flex-shrink-0">
-                <p className="text-white font-semibold text-base leading-snug line-clamp-2 flex-1">
-                  {videos[selectedVideoIndex].caption}
-                </p>
+              {/* BARRA INFERIORE POV/CAPTION (100px) - SPAZIO NERO DEDICATO AL TESTO */}
+              <div className="h-[100px] bg-black flex items-start px-5 pt-3 flex-shrink-0 border-t border-white/5">
+                <div className="w-full">
+                  <p className="text-[#D4AF37] text-[10px] font-black uppercase tracking-[0.2em] mb-1">POV:</p>
+                  <p className="text-white font-medium text-sm leading-snug line-clamp-3 italic">
+                    &quot;{videos[selectedVideoIndex].caption}&quot;
+                  </p>
+                </div>
               </div>
             </div>
           </div>
