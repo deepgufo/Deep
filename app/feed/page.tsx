@@ -14,6 +14,7 @@ import {
   Play
 } from 'lucide-react';
 import Image from 'next/image';
+import PWAInstallPrompt from '../components/PWAInstallPrompt';
 
 // --- INTERFACCE ---
 interface Post {
@@ -57,6 +58,18 @@ export default function FeedPage() {
   // Refs per video, intersection observer e paginazione
   const videoRefs = useRef<{ [key: string]: HTMLVideoElement | null }>({});
   const observerRef = useRef<IntersectionObserver | null>(null);
+
+  // --- LOGICA TRIGGER PWA DOPO 30 SECONDI ---
+  useEffect(() => {
+    const pwaTimer = setTimeout(() => {
+      // Impostiamo le interazioni a 3 per forzare l'attivazione del tutorial
+      localStorage.setItem('deep_interactions', '3');
+      // Lanciamo un evento custom per assicurarci che il componente PWA rilevi il cambio
+      window.dispatchEvent(new Event('storage'));
+    }, 30000); // 30 secondi
+
+    return () => clearTimeout(pwaTimer);
+  }, []);
 
   // --- FUNZIONE CARICAMENTO DATI ---
   const fetchVideos = async (isInitial = false) => {
@@ -596,6 +609,9 @@ export default function FeedPage() {
           </div>
         )}
       </div>
+
+      {/* POP-UP PWA TRIGGERATO DOPO 3 VIDEO */}
+      <PWAInstallPrompt />
 
       <style jsx global>{`
         .animate-fadeIn {

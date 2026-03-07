@@ -22,7 +22,8 @@ import {
   CheckCircle2,
   RefreshCcw,
   Monitor,
-  Smartphone
+  Smartphone,
+  Download
 } from 'lucide-react';
 import Image from 'next/image';
 
@@ -82,6 +83,9 @@ function ProfiloContent() {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null);
   const [feedbackMessage, setFeedbackMessage] = useState<{type: 'success' | 'error', text: string} | null>(null);
 
+  // --- STATO INSTALLAZIONE PWA ---
+  const [showInstallBtn, setShowInstallBtn] = useState(false);
+
   // --- LOGICA DI NAVIGAZIONE E URL ---
   useEffect(() => {
     const tab = searchParams.get('tab');
@@ -97,6 +101,31 @@ function ProfiloContent() {
     const params = new URLSearchParams(searchParams.toString());
     params.set('tab', newTab);
     router.push(`?${params.toString()}`, { scroll: false });
+  };
+
+  // --- CONTROLLO AMBIENTE PER TASTO INSTALLA ---
+  useEffect(() => {
+    const checkInstallation = () => {
+      const isStandalone = window.matchMedia('(display-mode: standalone)').matches 
+                           || (window.navigator as any).standalone;
+      
+      const ua = window.navigator.userAgent.toLowerCase();
+      const isMobile = /iphone|ipad|ipod|android/.test(ua);
+
+      // Mostra il tasto solo se è su mobile e NON è già installata
+      if (isMobile && !isStandalone) {
+        setShowInstallBtn(true);
+      }
+    };
+
+    checkInstallation();
+  }, []);
+
+  const triggerInstallPopup = () => {
+    // Settiamo le interazioni a 3 per forzare il componente PWAInstallPrompt nel layout a svegliarsi
+    localStorage.setItem('deep_interactions', '3');
+    // Lanciamo l'evento storage per comunicare con il componente globale
+    window.dispatchEvent(new Event('storage'));
   };
 
   // --- CARICAMENTO INIZIALE DATI ---
@@ -381,6 +410,16 @@ function ProfiloContent() {
               <ChevronLeft className="w-6 h-6" />
             </button>
 
+            {/* BOTTONE INSTALLA - DINAMICO */}
+            {showInstallBtn && (
+              <button
+                onClick={triggerInstallPopup}
+                className="px-4 py-1.5 rounded-full border-2 border-[#D4AF37] bg-black text-white text-[10px] font-extrabold uppercase tracking-widest shadow-[0_0_15px_rgba(212,175,55,0.3)] active:scale-95 transition-all animate-fadeIn"
+              >
+                Installa l&apos;app
+              </button>
+            )}
+
             <div className="relative" ref={menuRef}>
               <button 
                 onClick={() => setIsMenuOpen(!isMenuOpen)}
@@ -626,7 +665,7 @@ function ProfiloContent() {
                 </button>
                 <h3 className="text-white font-bold text-sm">Modifica Profilo</h3>
                 <button 
-                  onClick={saveProfile}
+                  onClick={saveProfile} 
                   disabled={isSavingProfile}
                   className="text-yellow-400 font-bold text-sm hover:text-yellow-300 transition-colors disabled:opacity-40"
                 >

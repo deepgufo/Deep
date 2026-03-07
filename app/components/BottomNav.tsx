@@ -18,7 +18,7 @@ export default function BottomNav({ userAvatar: initialAvatar }: BottomNavProps)
   // Stato per gestire l'avatar dinamicamente
   const [avatar, setAvatar] = useState<string | null>(initialAvatar || null);
 
-  // --- RECUPERO AVATAR DA SUPABASE CON CORREZIONE BUCKET ---
+  // --- RECUPERO AVATAR DA SUPABASE ---
   useEffect(() => {
     const fetchAvatar = async () => {
       try {
@@ -32,20 +32,7 @@ export default function BottomNav({ userAvatar: initialAvatar }: BottomNavProps)
             .single();
 
           if (data?.avatar_url) {
-            // --- LOGICA DI CORREZIONE PERCORSO ---
-            // Rimuoviamo ogni riferimento al vecchio bucket 'avatars' e forziamo 'ia-faces'
-            const rawUrl = data.avatar_url;
-            let finalUrl = rawUrl;
-
-            if (rawUrl.includes('/public/avatars/')) {
-              // Se l'URL è completo e contiene 'avatars', lo sostituiamo
-              finalUrl = rawUrl.replace('/public/avatars/', '/public/ia-faces/');
-            } else if (!rawUrl.startsWith('http')) {
-              // Se è un percorso relativo, costruiamo l'URL corretto su ia-faces
-              finalUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/ia-faces/${rawUrl}`;
-            }
-
-            setAvatar(finalUrl);
+            setAvatar(data.avatar_url);
           }
         }
       } catch (error) {

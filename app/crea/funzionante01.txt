@@ -42,6 +42,7 @@ export default function CreaPage() {
   const [showAuthPrompt, setShowAuthPrompt] = useState(false);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [loadingMessageIndex, setLoadingMessageIndex] = useState(0);
+  const [isSystemChecking, setIsSystemChecking] = useState(true); // Stato per il Kill-Switch
   
   const [isCoupleMode, setIsCoupleMode] = useState(false);
   const [coupleName, setCoupleName] = useState('');
@@ -60,6 +61,24 @@ export default function CreaPage() {
     setIsGenerating(false);
     
     const checkAuthAndLimits = async () => {
+      // --- CONTROLLO KILL-SWITCH / MAINTENANCE ---
+      try {
+        const { data: config } = await supabase
+          .from('system_config')
+          .select('maintenance_mode')
+          .eq('id', 1)
+          .single();
+        
+        if (config?.maintenance_mode) {
+          router.push('/manutenzione-soft');
+          return;
+        }
+      } catch (err) {
+        console.error("Errore controllo manutenzione", err);
+      }
+      setIsSystemChecking(false);
+      // ------------------------------------------
+
       const { data: { session } } = await supabase.auth.getSession();
       if (session) {
         setIsLoggedIn(true);
@@ -80,7 +99,7 @@ export default function CreaPage() {
     };
     
     checkAuthAndLimits();
-  }, []);
+  }, [router]);
 
   useEffect(() => {
     if (!isGenerating) return;
@@ -205,6 +224,11 @@ export default function CreaPage() {
 
   // Calcolo per l'attivazione visiva del bottone
   const isPromptReady = prompt.length >= 10;
+
+  // Schermata nera vuota mentre controlla il Kill-Switch
+  if (isSystemChecking) {
+    return <div className="h-[100dvh] w-full bg-[#0A0A0A]" />;
+  }
 
   return (
     <PageBackground>

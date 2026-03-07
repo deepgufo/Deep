@@ -7,7 +7,7 @@ import PageBackground from '../components/PageBackground';
 import { supabase } from '@/lib/supabase';
 
 export default function FinalizzazioneClient({ 
-  videoUrl, 
+  videoUrl: propVideoUrl, 
   initialPrompt, 
   category 
 }: { 
@@ -29,6 +29,10 @@ export default function FinalizzazioneClient({
   const [showIcon, setShowIcon] = useState(false);
   const [finalVideoUrl, setFinalVideoUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [username, setUsername] = useState<string>('');
+
+  // Gestiamo il videoUrl internamente per permettere il recupero da localStorage
+  const [currentVideoUrl, setCurrentVideoUrl] = useState(propVideoUrl);
 
   // Stati per la gestione della pubblicazione
   const [showPublishMenu, setShowPublishMenu] = useState(false);
@@ -61,25 +65,64 @@ export default function FinalizzazioneClient({
       console.error('Errore tracciamento evento:', err);
     }
   };
-  // ----------------------------------------------------
+
+  // --- RECUPERO USERNAME ---
+  useEffect(() => {
+    const fetchUsername = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        const { data } = await supabase
+          .from('profiles')
+          .select('username')
+          .eq('id', user.id)
+          .single();
+        if (data?.username) {
+          setUsername(data.username);
+        }
+      }
+    };
+    fetchUsername();
+  }, []);
 
   // --- LOGICA DI PERSISTENZA ---
-  // Salva la sessione nel localStorage per ripristinarla se l'app viene chiusa
   useEffect(() => {
-    if (videoUrl && videoUrl !== "undefined" && videoUrl !== "") {
+    if (propVideoUrl && propVideoUrl !== "undefined" && propVideoUrl !== "") {
       const sessionData = {
-        videoUrl,
+        videoUrl: propVideoUrl,
+        finalVideoUrl: finalVideoUrl, 
         initialPrompt,
         category,
         timestamp: Date.now()
       };
       localStorage.setItem('pending_production', JSON.stringify(sessionData));
-    }
-  }, [videoUrl, initialPrompt, category]);
+      
+      if (initialPrompt && initialPrompt !== "Il mio Film") {
+        setEditedPrompt(initialPrompt);
+      }
+    } else {
+      const saved = localStorage.getItem('pending_production');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Date.now() - parsed.timestamp < 1000 * 60 * 60 * 2) { 
+          setCurrentVideoUrl(parsed.videoUrl);
+          
+          if (parsed.initialPrompt && parsed.initialPrompt !== "") {
+            setEditedPrompt(parsed.initialPrompt);
+          }
 
-  // Funzione per pulire la sessione quando l'utente ha finito o vuole cambiare
+          if (parsed.finalVideoUrl) {
+            setFinalVideoUrl(parsed.finalVideoUrl);
+            setIsLoading(false);
+            setProgress(100);
+          }
+        }
+      }
+    }
+  }, [propVideoUrl, initialPrompt, category, finalVideoUrl]);
+
   const clearPendingSession = () => {
     localStorage.removeItem('pending_production');
+    localStorage.removeItem('predictionId');
   };
 
   useEffect(() => {
@@ -95,50 +138,43 @@ export default function FinalizzazioneClient({
     const startFaceSwap = async () => {
       if (hasStartedRequest.current) return;
 
-      if (!videoUrl || videoUrl === "undefined" || videoUrl === "") {
-        console.log("⏱️ In attesa dell'URL del video...");
+      if (finalVideoUrl) {
+        hasStartedRequest.current = true;
+        return;
+      }
+
+      const storedPredictionId = localStorage.getItem('predictionId');
+
+      if (!storedPredictionId) {
+        console.log("⏱️ Nessun ID produzione trovato. Attendo o Errore.");
+        if (!currentVideoUrl) {
+           setError("Dati mancanti per avviare la produzione.");
+           setIsLoading(false);
+        }
         return; 
       }
 
       hasStartedRequest.current = true;
-
-      // --- TRACCIAMENTO INIZIO GENERAZIONE ---
       trackSatisfactionEvent('video_start');
-      // ----------------------------------------
 
       try {
         const { data: { user }, error: authError } = await supabase.auth.getUser();
-        
         if (authError || !user) {
           throw new Error("Sessione non valida. Effettua nuovamente il login.");
         }
 
-        const cleanVideoUrl = decodeURIComponent(videoUrl);
-
-        console.log("--- START PRODUZIONE UNICA ---");
+        console.log("--- RIPRESA PRODUZIONE DA ID ESISTENTE: ", storedPredictionId);
         
-        const response = await fetch('/api/face-swap', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ 
-            videoUrl: cleanVideoUrl, 
-            userId: user.id 
-          })
-        });
-
-        const data = await response.json();
-
-        if (!response.ok) {
-          throw new Error(data.detail || data.error || "Errore durante la produzione");
-        }
-
-        const predictionId = data.predictionId;
+        const predictionId = storedPredictionId;
         setProgress(10);
 
         pollInterval = setInterval(async () => {
           try {
-            const checkRes = await fetch(`/api/face-swap?id=${predictionId}`);
-            if (!checkRes.ok) return;
+            const checkRes = await fetch(`/api/face-swap?id=${predictionId}&t=${Date.now()}`);
+            if (!checkRes.ok) {
+                const errData = await checkRes.json();
+                throw new Error(errData.error || "Errore di connessione al server.");
+            }
 
             const prediction = await checkRes.json();
             console.log("Stato Replicate:", prediction.status);
@@ -151,13 +187,11 @@ export default function FinalizzazioneClient({
                 setFinalVideoUrl(prediction.output);
                 setProgress(100);
                 setIsLoading(false);
-                // --- TRACCIAMENTO VIDEO PRONTO ---
                 trackSatisfactionEvent('video_ready');
-                // ---------------------------------
               }, 1500);
               
             } else if (prediction.status === 'failed') {
-              throw new Error(prediction.error || "L'elaborazione IA è fallita.");
+              throw new Error(prediction.error || "L'elaborazione cinematografica non è andata a buon fine.");
             } else if (prediction.status === 'starting') {
               setProgress((prev) => (prev < 15 ? prev + 1 : prev));
             } else if (prediction.status === 'processing') {
@@ -169,11 +203,12 @@ export default function FinalizzazioneClient({
               });
             }
           } catch (pollErr: any) {
-            if (pollErr.message.includes("fallita")) {
-              setError(pollErr.message);
-              clearInterval(pollInterval);
-              hasStartedRequest.current = false;
-            }
+             console.error("Polling Error:", pollErr);
+             setError(pollErr.message);
+             clearInterval(pollInterval);
+             clearInterval(msgInterval);
+             setIsLoading(false);
+             hasStartedRequest.current = false;
           }
         }, 3000);
 
@@ -182,6 +217,12 @@ export default function FinalizzazioneClient({
         setError(err.message);
         setIsLoading(false);
         hasStartedRequest.current = false;
+        
+        await supabase.from('debug_logs').insert([{
+          device_info: navigator.userAgent,
+          error_message: "Client Error: " + err.message,
+          context: "FinalizzazioneClient_Start"
+        }]);
       }
     };
 
@@ -191,7 +232,7 @@ export default function FinalizzazioneClient({
       if (pollInterval) clearInterval(pollInterval); 
       if (msgInterval) clearInterval(msgInterval);
     };
-  }, [videoUrl]);
+  }, [currentVideoUrl, finalVideoUrl]); 
 
   const handlePublishAction = async (status: 'pubblico' | 'privato') => {
     if (!finalVideoUrl) return;
@@ -238,13 +279,11 @@ export default function FinalizzazioneClient({
         throw new Error(result.error || "Errore durante il salvataggio sul server");
       }
 
-      // --- TRACCIAMENTO PUBBLICAZIONE ---
       if (status === 'pubblico') {
         trackSatisfactionEvent('video_published');
       } else {
         trackSatisfactionEvent('video_saved_private');
       }
-      // ----------------------------------
 
       clearPendingSession();
 
@@ -255,16 +294,7 @@ export default function FinalizzazioneClient({
       }
 
     } catch (err: any) {
-      console.error("Errore salvataggio server-side:", err);
       alert("Errore durante il salvataggio: " + err.message);
-      
-      try {
-        await supabase.from('debug_logs').insert([{
-          device_info: navigator.userAgent,
-          error_message: "ServerSave Error: " + err.message,
-          context: "FinalizzazioneClient"
-        }]);
-      } catch (e) { /* ignore */ }
     } finally {
       setIsPublishing(false);
     }
@@ -284,19 +314,74 @@ export default function FinalizzazioneClient({
     }
   };
 
+  // --- LOGICA WATERMARK CON USERNAME ---
+  const getWatermarkedBlob = async (videoUrl: string): Promise<Blob> => {
+    return new Promise((resolve, reject) => {
+      const video = document.createElement('video');
+      video.src = videoUrl;
+      video.crossOrigin = 'anonymous';
+      video.muted = true;
+      video.play();
+
+      video.onloadedmetadata = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return reject("Canvas context non disponibile");
+
+        const stream = canvas.captureStream(30);
+        const recorder = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp9' });
+        const chunks: Blob[] = [];
+
+        recorder.ondataavailable = (e) => chunks.push(e.data);
+        recorder.onstop = () => resolve(new Blob(chunks, { type: 'video/mp4' }));
+
+        recorder.start();
+
+        const drawFrame = () => {
+          if (video.ended || video.paused) {
+            recorder.stop();
+            return;
+          }
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+          
+          // Ombra per rendere il testo leggibile su ogni sfondo
+          ctx.shadowColor = "rgba(0,0,0,0.5)";
+          ctx.shadowBlur = 10;
+
+          // DISEGNO WATERMARK "DEEP"
+          ctx.font = `bold ${canvas.width * 0.05}px sans-serif`;
+          ctx.fillStyle = "#FFCC00";
+          ctx.textAlign = "right";
+          ctx.fillText("DEEP", canvas.width - 25, canvas.height - 55);
+          
+          // DISEGNO @USERNAME
+          ctx.font = `bold ${canvas.width * 0.035}px sans-serif`;
+          ctx.fillStyle = "rgba(255, 255, 255, 0.9)";
+          ctx.fillText(`@${username || 'user'}`, canvas.width - 25, canvas.height - 25);
+          
+          requestAnimationFrame(drawFrame);
+        };
+
+        drawFrame();
+      };
+      
+      video.onerror = () => reject("Errore caricamento video per watermark");
+    });
+  };
+
   const handleDownloadVideo = async () => {
-    // --- TRACCIAMENTO DOWNLOAD ---
     trackSatisfactionEvent('video_downloaded');
-    // -----------------------------
-    
-    const targetUrl = finalVideoUrl || videoUrl;
+    const targetUrl = finalVideoUrl || currentVideoUrl;
+    if (!targetUrl) return;
+
     try {
-      const response = await fetch(targetUrl);
-      const blob = await response.blob();
+      const blob = await getWatermarkedBlob(targetUrl);
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = `film_${category}_${Date.now()}.mp4`;
+      link.download = `deep_film_${category}.mp4`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -307,25 +392,38 @@ export default function FinalizzazioneClient({
   };
 
   const handleShare = async () => {
-    // --- TRACCIAMENTO CONDIVISIONE ---
     trackSatisfactionEvent('video_shared');
-    // ---------------------------------
-    
-    const targetUrl = finalVideoUrl || videoUrl;
-    if (navigator.share) {
-      try {
+    const targetUrl = finalVideoUrl || currentVideoUrl;
+
+    if (!targetUrl) return;
+
+    try {
+      const blob = await getWatermarkedBlob(targetUrl);
+      const file = new File([blob], `deep_film_${category}.mp4`, { type: 'video/mp4' });
+
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({
+          files: [file],
+          title: 'Guarda il mio film su Deep!',
+          text: `Ho creato questo film con Cinema Scuola.`,
+        });
+      } 
+      else if (navigator.share) {
         await navigator.share({
           title: 'Guarda il mio film!',
-          text: `Ho creato un film "${editedPrompt}" con Cinema Scuola.`,
           url: targetUrl,
+          text: `Ho creato un film "${editedPrompt}" con Cinema Scuola.`,
         });
-      } catch (err) { console.log('Share failed'); }
-    } else {
+      } 
+      else {
+        throw new Error("Condivisione non supportata");
+      }
+    } catch (err) {
       try {
         await navigator.clipboard.writeText(targetUrl);
-        alert("Link copiato negli appunti!");
-      } catch (err) {
-        alert("Link: " + targetUrl);
+        alert("Link copiato negli appunti! 📋");
+      } catch (copyErr) {
+        console.error('Errore condivisione:', err);
       }
     }
   };
@@ -333,25 +431,25 @@ export default function FinalizzazioneClient({
   return (
     <PageBackground>
       <div className="h-[100dvh] overflow-hidden flex items-start justify-center px-4 pt-6">
-        <div className="w-full max-w-md mx-auto relative">
+        <div className="w-full max-md mx-auto relative">
           
           {error ? (
             <div className="text-center pt-20 animate-fadeIn bg-black/40 p-6 rounded-3xl border border-red-500/30 backdrop-blur-md">
               <AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-4" />
-              <h3 className="text-white font-bold mb-2">Errore di Produzione</h3>
+              <h3 className="text-white font-bold mb-2">Ops! Qualcosa è andato storto</h3>
               <p className="text-gray-400 text-sm mb-6">{error}</p>
               <button 
                 onClick={() => {
                   if (error.toLowerCase().includes("faccia") || error.toLowerCase().includes("foto")) {
-                    clearPendingSession(); // Pulisci se l'errore richiede un reset del profilo
+                    clearPendingSession();
                     router.push('/completamento-profilo');
                   } else {
-                    window.location.reload();
+                    router.push('/crea');
                   }
                 }} 
                 className="w-full py-3 bg-yellow-400 text-black font-bold rounded-xl active:scale-95 transition-all"
               >
-                {error.toLowerCase().includes("faccia") ? "Carica Foto" : "Riprova"}
+                {error.toLowerCase().includes("faccia") ? "Carica Foto" : "Torna alla Creazione"}
               </button>
             </div>
           ) : isLoading ? (
@@ -415,30 +513,25 @@ export default function FinalizzazioneClient({
                 </button>
               )}
 
-              {/* Container del Video */}
               <div 
                 onClick={togglePlay}
                 className="relative w-full aspect-square rounded-[32px] overflow-hidden border-2 border-white/20 shadow-2xl bg-black cursor-pointer group"
               >
                 {finalVideoUrl ? (
                   <video
-                    key="final-video-player-with-audio"
+                    key="final-video"
                     ref={videoRef}
                     src={finalVideoUrl}
                     playsInline
                     loop
                     className="w-full h-full object-cover"
-                    onLoadedData={() => {
-                      videoRef.current?.play().catch(() => {
-                        console.log("Audio in attesa di interazione utente");
-                      });
-                    }}
+                    onLoadedData={() => videoRef.current?.play().catch(() => {})}
                   />
                 ) : (
                   <video
-                    key="preview-video-player"
+                    key="preview-video"
                     ref={videoRef}
-                    src={videoUrl}
+                    src={currentVideoUrl}
                     autoPlay
                     loop
                     playsInline
@@ -508,7 +601,7 @@ export default function FinalizzazioneClient({
                 </button>
                 <button 
                   onClick={() => {
-                    clearPendingSession(); // Pulizia sessione
+                    clearPendingSession();
                     router.push('/crea');
                   }} 
                   className="flex items-center justify-center gap-1.5 px-3 py-2 bg-black/40 border border-zinc-700 text-gray-300 text-xs rounded-lg active:scale-95"

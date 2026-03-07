@@ -3,7 +3,8 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
-import { X } from 'lucide-react';
+import { X, Mail, ArrowRight, CheckCircle2, Loader2 } from 'lucide-react';
+import Link from 'next/link';
 
 type ViewMode = 'initial' | 'login' | 'signup';
 
@@ -18,6 +19,27 @@ export default function AuthPage() {
   const [emailWarning, setEmailWarning] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
+
+  // --- STATI WAITLIST ---
+  const [showWaitlistInput, setShowWaitlistInput] = useState(false);
+  const [waitlistEmail, setWaitlistEmail] = useState('');
+  const [isSubmittingWaitlist, setIsSubmittingWaitlist] = useState(false);
+  const [waitlistResult, setWaitlistResult] = useState<{ position: number } | null>(null);
+  const [jitter, setJitter] = useState(0);
+
+  const BASE_OFFSET = 453;
+
+  // --- LOGICA OSCILLAZIONE CONTATORE ---
+  useEffect(() => {
+    if (!waitlistResult) return;
+
+    const interval = setInterval(() => {
+      // Oscillazione tra -1, 0, +1 per dare l'idea di movimento in tempo reale
+      setJitter(Math.floor(Math.random() * 3) - 1);
+    }, 2000);
+
+    return () => clearInterval(interval);
+  }, [waitlistResult]);
 
   // --- INIZIO AGGIUNTA FUNNEL TRACKING ---
   const trackFunnel = async (stepName: string) => {
@@ -160,6 +182,43 @@ export default function AuthPage() {
     } catch (error: any) {
       setError('Si è verificato un errore durante il login');
       setIsLoading(false);
+    }
+  };
+
+  const handleJoinWaitlist = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!waitlistEmail.includes('@')) {
+      alert("Inserisci un'email valida! 📧");
+      return;
+    }
+
+    setIsSubmittingWaitlist(true);
+    trackFunnel('waitlist_submit_attempt');
+
+    try {
+      const { error: insertError } = await supabase
+        .from('waitlist')
+        .insert([{ email: waitlistEmail }]);
+
+      if (insertError && insertError.code !== '23505') {
+        throw insertError;
+      }
+
+      const { count, error: countError } = await supabase
+        .from('waitlist')
+        .select('*', { count: 'exact', head: true });
+
+      if (countError) throw countError;
+
+      const currentCount = count || 0;
+      setWaitlistResult({ position: BASE_OFFSET + currentCount });
+      trackFunnel('waitlist_success');
+      
+    } catch (err) {
+      console.error("Errore waitlist:", err);
+      alert("C'è stato un problema. Riprova tra poco!");
+    } finally {
+      setIsSubmittingWaitlist(false);
     }
   };
 
@@ -325,6 +384,19 @@ export default function AuthPage() {
                 </div>
               )}
 
+              {/* CLAUSOLA LEGALE OBBLIGATORIA */}
+              <div className="text-[11px] text-gray-500 text-center leading-relaxed px-2">
+                Cliccando su Registrati accetti i nostri{' '}
+                <Link href="/termini_privacy" className="text-yellow-400/80 underline decoration-yellow-400/30 hover:text-yellow-400 transition-colors">
+                  Termini di Servizio
+                </Link>{' '}
+                e la{' '}
+                <Link href="/termini_privacy" className="text-yellow-400/80 underline decoration-yellow-400/30 hover:text-yellow-400 transition-colors">
+                  Privacy Policy
+                </Link>
+                .
+              </div>
+
               <button
                 type="submit"
                 disabled={isLoading}
@@ -333,9 +405,74 @@ export default function AuthPage() {
                 {isLoading ? 'Registrazione in corso...' : 'REGISTRATI'}
               </button>
             </form>
+
+            {/* --- SEZIONE WAITLIST --- */}
+            <div className="mt-10 pt-8 border-t border-white/10">
+              {!waitlistResult ? (
+                <div className="text-center space-y-4">
+                  <p className="text-gray-500 text-sm">
+                    Non sei del Polo-Fermi-Montale?<br />
+                    Mettiti in lista per essere il prossimo
+                  </p>
+
+                  {!showWaitlistInput ? (
+                    <button
+                      onClick={() => setShowWaitlistInput(true)}
+                      className="w-full py-3 border border-yellow-400/50 text-white font-semibold rounded-lg hover:bg-yellow-400/5 transition-all"
+                    >
+                      mettiti in lisata!
+                    </button>
+                  ) : (
+                    <form onSubmit={handleJoinWaitlist} className="relative flex items-center animate-slideIn">
+                      <input
+                        autoFocus
+                        type="email"
+                        value={waitlistEmail}
+                        onChange={(e) => setWaitlistEmail(e.target.value)}
+                        placeholder="Inserisci la tua email..."
+                        className="w-full px-4 py-3 bg-white/5 border border-yellow-400 rounded-lg text-white placeholder-gray-600 focus:outline-none"
+                        required
+                      />
+                      <button
+                        type="submit"
+                        disabled={isSubmittingWaitlist}
+                        className="absolute right-2 p-2 bg-yellow-400 text-black rounded-md disabled:opacity-50"
+                      >
+                        {isSubmittingWaitlist ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowRight className="w-4 h-4" />}
+                      </button>
+                    </form>
+                  )}
+                </div>
+              ) : (
+                <div className="p-6 bg-yellow-400/5 border border-yellow-400/20 rounded-xl text-center space-y-4 animate-fadeIn">
+                  <div className="flex justify-center">
+                    <CheckCircle2 className="w-10 h-10 text-yellow-400" />
+                  </div>
+                  <div className="space-y-2">
+                    <h3 className="text-white font-bold">Sei in lista d'attesa.</h3>
+                    <p className="text-gray-400 text-xs leading-relaxed">
+                      Attualmente ci sono <span className="text-white font-bold">{(waitlistResult.position - 1) + jitter}</span> Utenti prima di te.
+                      Ti invieremo un codice non appena i server saranno pronti.
+                    </p>
+                    <div className="pt-2">
+                      <span className="inline-block px-3 py-1 bg-yellow-400 text-black text-[10px] font-black rounded-full uppercase">
+                        Sei il numero #{waitlistResult.position} in lista d'attesa
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         )}
       </div>
+
+      <style jsx global>{`
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes slideIn { from { transform: translateY(10px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+        .animate-fadeIn { animation: fadeIn 0.5s ease-out; }
+        .animate-slideIn { animation: slideIn 0.3s ease-out; }
+      `}</style>
     </main>
   );
 }

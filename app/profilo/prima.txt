@@ -451,7 +451,8 @@ function ProfiloContent() {
             <div className="flex items-center gap-3 mb-6">
               <span className="text-zinc-400 text-sm">@{profile.username}</span>
               <div className="w-px h-4 bg-zinc-700"></div>
-              <span className="text-zinc-500 text-sm">{profile.gender === 'M' ? 'Attore' : 'Attrice'}</span>
+              {/* MODIFICATA SOLO LA STAMPA DEL GENERE (Legge dal db e fa la prima lettera maiuscola) */}
+              <span className="text-zinc-500 text-sm capitalize">{profile.gender || 'Attrice'}</span>
             </div>
 
             {/* SEPARATORE */}

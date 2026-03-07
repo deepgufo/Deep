@@ -4,6 +4,7 @@ import "./globals.css";
 import LayoutWrapper from "./components/LayoutWrapper";
 import PWARegister from "./components/PWARegister";
 import { ActivityTracker } from "./components/ActivityTracker";
+import PWAInstallPrompt from "./components/PWAInstallPrompt";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -26,7 +27,7 @@ export const viewport: Viewport = {
 
 export const metadata: Metadata = {
   metadataBase: new URL('https://deepfly.app'),
-  title: "Deep - Diventa il protagonista",
+  title: "Deep",
   description: "Trasforma i tuoi momenti a scuola in scene da film con l'IA",
   manifest: "/manifest.json",
   appleWebApp: {
@@ -70,13 +71,13 @@ export default function RootLayout({
         <meta name="apple-mobile-web-app-title" content="Deep" />
         
         {/* iOS Icons */}
-        <link rel="apple-touch-icon" href="/icon-192x192.png" />
-        <link rel="apple-touch-icon" sizes="152x152" href="/icon-192x192.png" />
-        <link rel="apple-touch-icon" sizes="180x180" href="/icon-192x192.png" />
-        <link rel="apple-touch-icon" sizes="167x167" href="/icon-192x192.png" />
+        <link rel="apple-touch-icon" href="/logo_01.png" />
+        <link rel="apple-touch-icon" sizes="152x152" href="/logo_01.png" />
+        <link rel="apple-touch-icon" sizes="180x180" href="/logo_01.png" />
+        <link rel="apple-touch-icon" sizes="167x167" href="/logo_01.png" />
         
         {/* Favicon */}
-        <link rel="icon" href="/icon-192x192.png" type="image/png" />
+        <link rel="icon" href="/logo_01.png" type="image/png" />
       </head>
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased bg-black`}
@@ -108,6 +109,7 @@ export default function RootLayout({
         />
         <PWARegister />
         <ActivityTracker />
+        <PWAInstallPrompt />
         <LayoutWrapper>{children}</LayoutWrapper>
       </body>
     </html>

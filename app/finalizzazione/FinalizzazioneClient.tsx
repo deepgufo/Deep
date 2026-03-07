@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Film, Download, Share2, RotateCcw, Edit2, Play, Pause, AlertCircle, Sparkles, Wand2, ChevronUp, Lock, Globe, ArrowLeft } from 'lucide-react';
 import PageBackground from '../components/PageBackground';
 import { supabase } from '@/lib/supabase';
+import PWAInstallPrompt from '../components/PWAInstallPrompt';
 
 export default function FinalizzazioneClient({ 
   videoUrl: propVideoUrl, 
@@ -30,6 +31,9 @@ export default function FinalizzazioneClient({
   const [finalVideoUrl, setFinalVideoUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [username, setUsername] = useState<string>('');
+
+  // Stato per il trigger del pop-up PWA
+  const [showPWAPopup, setShowPWAPopup] = useState(false);
 
   // Gestiamo il videoUrl internamente per permettere il recupero da localStorage
   const [currentVideoUrl, setCurrentVideoUrl] = useState(propVideoUrl);
@@ -119,6 +123,19 @@ export default function FinalizzazioneClient({
       }
     }
   }, [propVideoUrl, initialPrompt, category, finalVideoUrl]);
+
+  // --- TRIGGER PWA DOPO 15 SECONDI DAL VIDEO PRONTO ---
+  useEffect(() => {
+    if (finalVideoUrl && !isLoading) {
+      const pwaTimer = setTimeout(() => {
+        // Incrementiamo forzatamente le interazioni per soddisfare la logica interna del componente PWA
+        localStorage.setItem('deep_interactions', '3');
+        setShowPWAPopup(true);
+      }, 15000); // 15 secondi
+
+      return () => clearTimeout(pwaTimer);
+    }
+  }, [finalVideoUrl, isLoading]);
 
   const clearPendingSession = () => {
     localStorage.removeItem('pending_production');
@@ -613,6 +630,9 @@ export default function FinalizzazioneClient({
           )}
         </div>
       </div>
+
+      {/* RENDER DEL POP-UP PWA DOPO IL DELAY */}
+      {showPWAPopup && <PWAInstallPrompt />}
     </PageBackground>
   );
 }

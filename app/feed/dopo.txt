@@ -27,28 +27,32 @@ interface Post {
     full_name: string;
     username: string;
     avatar_url: string | null;
+    school_name?: string;
   };
   likes_count: number;
   has_user_liked: boolean;
 }
 
 /**
- * FEED CINEMATOGRAFICO - LAYOUT A BLOCCHI/CARD
- * Design compatto con icone laterali e info dentro il video
+ * FEED CINEMATOGRAFICO - LAYOUT MATTONE MOBILE OPTIMIZED
+ * Design compatto a blocchi perfetti per mobile
  */
 export default function FeedPage() {
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState<'film' | 'seguiti'>('film');
+  const [activeTab, setActiveTab] = useState<'film' | 'school'>('film');
   const [posts, setPosts] = useState<Post[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isFetchingMore, setIsFetchingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   
+  const [userSchoolName, setUserSchoolName] = useState<string | null>(null);
+  
   // Stati UI
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [pausedVideos, setPausedVideos] = useState<Set<string>>(new Set());
   const [confettiActive, setConfettiActive] = useState<string | null>(null);
+  const [expandedPosts, setExpandedPosts] = useState<Set<string>>(new Set());
 
   // Refs per video, intersection observer e paginazione
   const videoRefs = useRef<{ [key: string]: HTMLVideoElement | null }>({});
@@ -64,43 +68,104 @@ export default function FeedPage() {
       const userId = session?.user?.id || null;
       setCurrentUserId(userId);
 
+      // Recupero il school_name dell'utente se non lo abbiamo ancora
+      let currentSchool = userSchoolName;
+      if (userId && !currentSchool) {
+        const { data: profileData } = await supabase
+          .from('profiles')
+          .select('school_name')
+          .eq('id', userId)
+          .single();
+          
+        if (profileData?.school_name) {
+          currentSchool = profileData.school_name;
+          setUserSchoolName(profileData.school_name);
+        }
+      }
+
       const start = isInitial ? 0 : posts.length;
       const end = start + 2; 
 
-      let query = supabase
-        .from('public_videos')
-        .select(`
-          id,
-          video_url,
-          caption,
-          created_at,
-          user_id,
-          likes_count,
-          profiles:user_id (
+      let query;
+
+      // --- LOGICA FEED SCUOLA (DENORMALIZZATA) ---
+      if (activeTab === 'school') {
+        if (!currentSchool) {
+          setPosts([]);
+          setHasMore(false);
+          setIsFetchingMore(false);
+          setIsLoading(false);
+          return;
+        }
+
+        // Utilizziamo la colonna school_name direttamente su public_videos
+        query = supabase
+          .from('public_videos')
+          .select(`
             id,
-            full_name,
-            username,
-            avatar_url
-          )
-        `)
-        .order('created_at', { ascending: false })
-        .range(start, end);
+            video_url,
+            caption,
+            created_at,
+            user_id,
+            school_name,
+            profiles:user_id (
+              id,
+              full_name,
+              username,
+              avatar_url
+            )
+          `)
+          .eq('school_name', currentSchool) // Filtro diretto sulla tabella video
+          .order('created_at', { ascending: false })
+          .range(start, end);
+          
+      } else {
+        // Query Pubblica (FILM): Intoccata
+        query = supabase
+          .from('public_videos')
+          .select(`
+            id,
+            video_url,
+            caption,
+            created_at,
+            user_id,
+            profiles:user_id (
+              id,
+              full_name,
+              username,
+              avatar_url
+            )
+          `)
+          .order('created_at', { ascending: false })
+          .range(start, end);
+      }
 
       const { data: videosData, error } = await query;
 
       if (error) {
-        console.error('❌ Errore caricamento feed:', error);
+        console.error('❌ Errore caricamento feed:', error.message);
         setIsLoading(false);
         setIsFetchingMore(false);
         return;
       }
 
-      if (!videosData || videosData.length < 3) {
+      if (!videosData || videosData.length === 0) {
+        setHasMore(false);
+        if (isInitial) setPosts([]);
+        return;
+      }
+
+      if (videosData.length < 3) {
         setHasMore(false);
       }
 
       const transformedPosts: Post[] = await Promise.all(
         (videosData || []).map(async (video: any) => {
+          const { count: likesCount } = await supabase
+            .from('likes')
+            .select('*', { count: 'exact', head: true })
+            .eq('film_id', video.id);
+
           let hasUserLiked = false;
           if (userId) {
             const { data: likeData } = await supabase
@@ -120,7 +185,7 @@ export default function FeedPage() {
             created_at: video.created_at,
             user_id: video.user_id,
             profile: video.profiles,
-            likes_count: video.likes_count || 0,
+            likes_count: likesCount || 0,
             has_user_liked: hasUserLiked
           };
         })
@@ -143,7 +208,7 @@ export default function FeedPage() {
     fetchVideos(true);
   }, [activeTab]);
 
-  // --- INTERSECTION OBSERVER PER AUTOPLAY E INFINITE SCROLL ---
+  // --- INTERSECTION OBSERVER ---
   useEffect(() => {
     observerRef.current = new IntersectionObserver(
       (entries) => {
@@ -153,7 +218,7 @@ export default function FeedPage() {
           
           if (entry.isIntersecting) {
             if (postId && !pausedVideos.has(postId)) {
-              video.play().catch((e) => console.log("Autoplay richiede interazione"));
+              video.play().catch(() => {});
             }
             
             const currentIndex = posts.findIndex(p => p.id === postId);
@@ -177,7 +242,7 @@ export default function FeedPage() {
     };
   }, [posts, hasMore, isFetchingMore, pausedVideos]);
 
-  // --- GESTIONE LIKE/OSCAR (Sincronizzato con DB) ---
+  // --- GESTIONE LIKE/OSCAR ---
   const handleLikeToggle = async (postId: string) => {
     if (!currentUserId) {
       alert('Devi effettuare il login per mettere like!');
@@ -189,39 +254,44 @@ export default function FeedPage() {
     if (!post) return;
 
     const wasLiked = post.has_user_liked;
-    const newCount = wasLiked ? post.likes_count - 1 : post.likes_count + 1;
     
     if (!wasLiked) {
       setConfettiActive(postId);
       setTimeout(() => setConfettiActive(null), 2200);
     }
     
-    // UI Update immediato (Optimistic Update)
     setPosts((prev) =>
       prev.map((p) =>
         p.id === postId
-          ? { ...p, has_user_liked: !wasLiked, likes_count: Math.max(0, newCount) }
+          ? {
+              ...p,
+              has_user_liked: !wasLiked,
+              likes_count: wasLiked ? p.likes_count - 1 : p.likes_count + 1
+            }
           : p
       )
     );
 
     try {
-      if (wasLiked) {
-        // Rimuovi like e decrementa contatore
-        await supabase.from('likes').delete().eq('film_id', postId).eq('user_id', currentUserId);
-        await supabase.rpc('decrement_likes', { row_id: postId });
-      } else {
-        // Aggiungi like e incrementa contatore
-        await supabase.from('likes').insert({ film_id: postId, user_id: currentUserId });
-        await supabase.rpc('increment_likes', { row_id: postId });
+      const { data, error } = await supabase.rpc('toggle_oscar', { 
+        target_video_id: postId 
+      });
+
+      if (error) throw error;
+
+      if (data && typeof data.new_count === 'number') {
+        setPosts((prev) =>
+          prev.map((p) =>
+            p.id === postId ? { ...p, likes_count: data.new_count } : p
+          )
+        );
       }
     } catch (error) {
-      console.error('❌ Errore database like:', error);
-      // Rollback se fallisce
+      console.error('❌ Errore sincronizzazione Oscar:', error);
       setPosts((prev) =>
         prev.map((p) =>
           p.id === postId
-            ? { ...p, has_user_liked: wasLiked, likes_count: post.likes_count }
+            ? { ...p, has_user_liked: wasLiked, likes_count: wasLiked ? p.likes_count + 1 : p.likes_count - 1 }
             : p
         )
       );
@@ -284,7 +354,16 @@ export default function FeedPage() {
     }
   };
 
-  // --- RENDER LOADING ---
+  // --- TOGGLE ESPANSIONE TESTO ---
+  const toggleExpand = (postId: string) => {
+    setExpandedPosts(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(postId)) newSet.delete(postId);
+      else newSet.add(postId);
+      return newSet;
+    });
+  };
+
   if (isLoading) {
     return (
       <div className="flex flex-col items-center justify-center h-screen bg-black">
@@ -296,86 +375,81 @@ export default function FeedPage() {
 
   return (
     <main className="fixed inset-0 bg-[#000000]">
-      {/* HEADER CON TAB */}
-      <header className="fixed top-0 left-0 right-0 z-50 bg-black/80 backdrop-blur-xl border-b border-zinc-900">
-        <div className="max-w-md mx-auto flex items-center justify-center gap-8 px-4 py-4">
+      <header className="fixed top-0 left-0 right-0 z-50 bg-black/90 backdrop-blur-xl border-b border-white/5">
+        <div className="max-w-md mx-auto flex items-center justify-center gap-8 px-4 py-2.5">
           <button
             onClick={() => setActiveTab('film')}
-            className={`relative pb-2 transition-all duration-300 ${
+            className={`relative pb-1 transition-all duration-300 ${
               activeTab === 'film'
-                ? 'text-white text-lg font-black'
-                : 'text-zinc-600 text-base font-bold'
+                ? 'text-white text-base font-bold'
+                : 'text-zinc-600 text-sm font-semibold'
             }`}
           >
             Film
             {activeTab === 'film' && (
-              <div className="absolute bottom-0 left-0 right-0 h-[3px] bg-[#D4AF37] rounded-full"></div>
+              <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-[#D4AF37] rounded-full"></div>
             )}
           </button>
           
           <button
-            onClick={() => setActiveTab('seguiti')}
-            className={`relative pb-2 transition-all duration-300 ${
-              activeTab === 'seguiti'
-                ? 'text-white text-lg font-black'
-                : 'text-zinc-600 text-base font-bold'
+            onClick={() => setActiveTab('school')}
+            className={`relative pb-1 transition-all duration-300 uppercase ${
+              activeTab === 'school'
+                ? 'text-white text-base font-bold'
+                : 'text-zinc-600 text-sm font-semibold'
             }`}
           >
-            Seguiti
-            {activeTab === 'seguiti' && (
-              <div className="absolute bottom-0 left-0 right-0 h-[3px] bg-[#D4AF37] rounded-full"></div>
+            {userSchoolName ? userSchoolName : 'Scuola'}
+            {activeTab === 'school' && (
+              <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-[#D4AF37] rounded-full"></div>
             )}
           </button>
         </div>
       </header>
 
-      {/* FEED SCROLLABILE CON SNAP */}
-      <div className="h-full overflow-y-auto snap-y snap-mandatory pt-[73px] pb-20" style={{ scrollSnapType: 'y mandatory' }}>
+      <div className="h-full overflow-y-auto snap-y snap-mandatory pt-[48px] pb-20" style={{ scrollSnapType: 'y mandatory' }}>
         {posts.length > 0 ? (
           posts.map((post) => (
             <div
               key={post.id}
-              className="min-h-[calc(100vh-73px)] snap-center snap-always flex flex-col items-center justify-center py-4"
+              className="h-[calc(100vh-48px)] snap-start flex items-center justify-center"
             >
-              <div className="relative w-full max-w-[390px] mx-auto">
+              <div className="relative w-full h-[calc(100vh-140px)] max-w-[390px] mx-auto flex flex-col bg-black">
                 
-                {/* HEADER: AVATAR, NOME E MENU */}
-                <div className="flex items-center justify-between gap-3 mb-2 px-4">
-                  <div className="flex items-center gap-3 flex-1 min-w-0">
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        router.push(`/users/${post.user_id}`);
-                      }}
-                      className="flex-shrink-0"
-                    >
-                      <div className="w-10 h-10 rounded-full overflow-hidden border-2 border-[#D4AF37]">
-                        {post.profile?.avatar_url ? (
-                          <Image
-                            src={post.profile.avatar_url}
-                            alt={post.profile.full_name}
-                            width={40}
-                            height={40}
-                            className="w-full h-full object-cover"
-                          />
-                        ) : (
-                          <div className="w-full h-full bg-zinc-800 flex items-center justify-center">
-                            <span className="text-zinc-400 text-sm font-bold">
-                              {post.profile?.full_name?.[0] || '?'}
-                            </span>
-                          </div>
-                        )}
-                      </div>
-                    </button>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-[#F8F8F8] font-semibold text-sm">
+                <div className="h-[70px] bg-black flex items-center justify-between px-4 flex-shrink-0">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      router.push(`/users/${post.user_id}`);
+                    }}
+                    className="flex items-center gap-3"
+                  >
+                    <div className="w-11 h-11 rounded-full overflow-hidden border-[1.5px] border-white/80">
+                      {post.profile?.avatar_url ? (
+                        <Image
+                          src={post.profile.avatar_url}
+                          alt={post.profile.full_name || 'avatar'}
+                          width={44}
+                          height={44}
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <div className="w-full h-full bg-zinc-800 flex items-center justify-center">
+                          <span className="text-zinc-400 text-sm font-bold">
+                            {post.profile?.full_name?.[0] || '?'}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                    <div className="text-left">
+                      <p className="text-white font-semibold text-base">
                         @{post.profile?.username || post.profile?.full_name?.toLowerCase().replace(/\s/g, '') || 'anonimo'}
                       </p>
                       <p className="text-[#D4AF37] font-bold text-xs tracking-wide">
                         REGISTA
                       </p>
                     </div>
-                  </div>
+                  </button>
 
                   <div className="relative flex-shrink-0">
                     <button
@@ -385,7 +459,7 @@ export default function FeedPage() {
                       }}
                       className="w-8 h-8 flex items-center justify-center hover:scale-110 transition-transform"
                     >
-                      <MoreVertical className="w-5 h-5 text-[#F8F8F8]" />
+                      <MoreVertical className="w-5 h-5 text-white" />
                     </button>
 
                     {openMenuId === post.id && (
@@ -417,89 +491,87 @@ export default function FeedPage() {
                   </div>
                 </div>
 
-                {/* VIDEO CON CORNICE DORATA */}
-                <div className="relative">
-                  <div 
-                    className="relative w-full aspect-[9/16] max-h-[65vh] overflow-hidden border-[3px] border-[#D4AF37] shadow-[0_0_40px_rgba(212,175,55,0.3)] bg-black cursor-pointer rounded-lg"
-                    onClick={() => handleVideoClick(post.id)}
-                  >
-                    <video
-                      ref={(el) => {
-                        videoRefs.current[post.id] = el;
-                      }}
-                      data-id={post.id}
-                      src={post.video_url}
-                      className="w-full h-full object-cover"
-                      loop
-                      playsInline
-                    />
+                <div 
+                  className="relative flex-1 w-full overflow-hidden border-y-[0.5px] border-white/5 bg-black cursor-pointer"
+                  onClick={() => handleVideoClick(post.id)}
+                >
+                  <video
+                    ref={(el) => {
+                      videoRefs.current[post.id] = el;
+                    }}
+                    data-id={post.id}
+                    src={post.video_url}
+                    className="w-full h-full object-cover"
+                    loop
+                    playsInline
+                  />
 
-                    {pausedVideos.has(post.id) && (
-                      <div className="absolute inset-0 flex items-center justify-center z-30 bg-black/20">
-                        <div className="w-16 h-16 flex items-center justify-center rounded-full bg-white/20 backdrop-blur-md">
-                          <Play className="w-8 h-8 text-white fill-white" />
-                        </div>
+                  {pausedVideos.has(post.id) && (
+                    <div className="absolute inset-0 flex items-center justify-center z-30 bg-black/20">
+                      <div className="w-16 h-16 flex items-center justify-center rounded-full bg-white/20 backdrop-blur-md">
+                        <Play className="w-8 h-8 text-white fill-white" />
                       </div>
-                    )}
-
-                    {confettiActive === post.id && (
-                      <div className="absolute inset-0 pointer-events-none z-50 overflow-hidden">
-                        {Array.from({ length: 80 }).map((_, i) => (
-                          <div
-                            key={i}
-                            className="confetti"
-                            style={{
-                              left: `${Math.random() * 100}%`,
-                              animationDelay: `${Math.random() * 0.4}s`,
-                              animationDuration: `${1.8 + Math.random() * 0.4}s`,
-                            }}
-                          />
-                        ))}
-                      </div>
-                    )}
-
-                    <div className="absolute bottom-3 right-3 flex flex-col items-center gap-3 z-40">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleLikeToggle(post.id);
-                        }}
-                        className="flex flex-col items-center gap-1 group"
-                      >
-                        <div className={`relative transition-all duration-300 ${
-                          post.has_user_liked ? 'scale-110' : 'scale-100'
-                        }`}>
-                          {post.has_user_liked ? (
-                            <div className="text-3xl drop-shadow-[0_0_10px_rgba(212,175,55,0.8)]">🏆</div>
-                          ) : (
-                            <span className="text-2xl drop-shadow-[0_2px_8px_rgba(0,0,0,0.9)] group-hover:scale-110 transition-transform">🏆</span>
-                          )}
-                        </div>
-                        <span className={`text-xs font-bold drop-shadow-[0_2px_8px_rgba(0,0,0,0.9)] ${
-                          post.has_user_liked ? 'text-[#D4AF37]' : 'text-[#F8F8F8]'
-                        }`}>
-                          {post.likes_count}
-                        </span>
-                      </button>
-
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleShare(post);
-                        }}
-                        className="flex flex-col items-center gap-1 group"
-                      >
-                        <Share2 className="w-6 h-6 text-[#F8F8F8] drop-shadow-[0_2px_8px_rgba(0,0,0,0.9)] group-hover:scale-110 transition-transform" />
-                      </button>
                     </div>
+                  )}
+
+                  {confettiActive === post.id && (
+                    <div className="absolute inset-0 pointer-events-none z-50 overflow-hidden">
+                      {Array.from({ length: 80 }).map((_, i) => (
+                        <div
+                          key={i}
+                          className="confetti"
+                          style={{
+                            left: `${Math.random() * 100}%`,
+                            animationDelay: `${Math.random() * 0.4}s`,
+                            animationDuration: `${1.8 + Math.random() * 0.4}s`,
+                          }}
+                        />
+                      ))}
+                    </div>
+                  )}
+
+                  <div className="absolute bottom-10 right-4 flex flex-col items-center gap-4 z-40">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleLikeToggle(post.id);
+                      }}
+                      className="flex flex-col items-center gap-1 group"
+                    >
+                      <div className={`relative transition-all duration-300 ${
+                        post.has_user_liked ? 'scale-110' : 'scale-100'
+                      }`}>
+                        {post.has_user_liked ? (
+                          <div className="text-3xl drop-shadow-[0_0_10px_rgba(212,175,55,0.8)]">🏆</div>
+                        ) : (
+                          <span className="text-2xl drop-shadow-[0_2px_8px_rgba(0,0,0,0.9)] group-hover:scale-110 transition-transform">🏆</span>
+                        )}
+                      </div>
+                      <span className={`text-xs font-bold drop-shadow-[0_2px_8px_rgba(0,0,0,0.9)] ${
+                        post.has_user_liked ? 'text-[#D4AF37]' : 'text-white'
+                      }`}>
+                        {post.likes_count}
+                      </span>
+                    </button>
+
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleShare(post);
+                      }}
+                      className="group"
+                    >
+                      <Share2 className="w-6 h-6 text-white drop-shadow-[0_2px_8px_rgba(0,0,0,0.9)] group-hover:scale-110 transition-transform" />
+                    </button>
                   </div>
                 </div>
 
-                {/* FOOTER: TITOLO */}
-                <div className="mt-3 px-4 bg-[#000000] text-center">
-                  <h2 className="text-[#F8F8F8] font-bold text-base leading-tight">
+                <div 
+                  className="bg-black flex items-center px-4 flex-shrink-0 h-[75px]"
+                >
+                  <p className="text-white font-semibold text-base leading-snug flex-1 line-clamp-3 overflow-hidden">
                     {post.prompt}
-                  </h2>
+                  </p>
                 </div>
               </div>
             </div>
@@ -509,9 +581,11 @@ export default function FeedPage() {
             <div className="w-20 h-20 bg-zinc-900 rounded-full flex items-center justify-center mb-6 border border-zinc-800">
               <AlertCircle className="w-10 h-10 text-zinc-700" />
             </div>
-            <h3 className="text-xl font-bold text-[#F8F8F8] mb-2">Nessun Contenuto</h3>
+            <h3 className="text-xl font-bold text-white mb-2">Nessun Contenuto</h3>
             <p className="text-zinc-500 text-sm max-w-xs">
-              Torna più tardi o inizia a seguire altri creatori!
+              {activeTab === 'school' 
+                ? "Non ci sono ancora video dalla tua scuola." 
+                : "Non ci sono ancora video nel feed. Torna più tardi o inizia a seguire altri creatori!"}
             </p>
           </div>
         )}
@@ -524,11 +598,14 @@ export default function FeedPage() {
       </div>
 
       <style jsx global>{`
-        .animate-fadeIn { animation: fadeIn 0.2s ease-out; }
+        .animate-fadeIn {
+          animation: fadeIn 0.2s ease-out;
+        }
         @keyframes fadeIn {
           from { opacity: 0; transform: translateY(-10px); }
           to { opacity: 1; transform: translateY(0); }
         }
+        
         .confetti {
           position: absolute;
           top: -20px;
@@ -540,10 +617,15 @@ export default function FeedPage() {
           border-radius: 2px;
           box-shadow: 0 0 8px rgba(212, 175, 55, 0.6);
         }
+        
         @keyframes confettiFall {
-          0% { opacity: 1; transform: translateY(0) rotateZ(0deg); }
-          100% { opacity: 0; transform: translateY(100vh) rotateZ(720deg); }
+          0% { opacity: 1; transform: translateY(0) translateX(0) rotateZ(0deg) rotateY(0deg); }
+          25% { transform: translateY(25vh) translateX(30px) rotateZ(180deg) rotateY(90deg); }
+          50% { transform: translateY(50vh) translateX(-20px) rotateZ(360deg) rotateY(180deg); }
+          75% { transform: translateY(75vh) translateX(25px) rotateZ(540deg) rotateY(270deg); }
+          100% { opacity: 0; transform: translateY(100vh) translateX(-10px) rotateZ(720deg) rotateY(360deg); }
         }
+        
         .overflow-y-auto::-webkit-scrollbar { display: none; }
         .overflow-y-auto { -ms-overflow-style: none; scrollbar-width: none; }
       `}</style>
