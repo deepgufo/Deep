@@ -23,12 +23,15 @@ import {
   RefreshCcw,
   Monitor,
   Smartphone,
-  Download
+  Download,
+  Share2,
+  MoreVertical
 } from 'lucide-react';
 import Image from 'next/image';
 
 // --- INTERFACCE E TIPI ---
 interface UserProfile {
+  id: string;
   full_name: string;
   avatar_url: string | null;
   username: string;
@@ -40,21 +43,22 @@ interface UserProfile {
 interface Video {
   id: string;
   video_url: string;
-  prompt: string;
+  caption: string; // Allineato a public_videos (mappato da prompt per privati)
   status: 'pubblico' | 'privato';
+  oscar_count?: number;
   created_at: string;
 }
 
 /**
  * COMPONENTE CONTENUTO PROFILO
- * Contiene tutta la logica originale.
- * È stato rinominato per poter essere avvolto dal Suspense.
+ * Contiene tutta la logica originale integrata con la visualizzazione TikTok-style per i video pubblici.
  */
 function ProfiloContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const menuRef = useRef<HTMLDivElement>(null);
   const videoRefs = useRef<{ [key: string]: HTMLVideoElement | null }>({});
+  const feedVideoRefs = useRef<{ [key: string]: HTMLVideoElement | null }>({});
   
   // --- STATI PRINCIPALI ---
   const [profile, setProfile] = useState<UserProfile | null>(null);
@@ -65,7 +69,8 @@ function ProfiloContent() {
   const [videos, setVideos] = useState<Video[]>([]);
   const [activeTab, setActiveTab] = useState<'film' | 'provini'>('film');
   const [isLoadingVideos, setIsLoadingVideos] = useState(true);
-  const [selectedVideo, setSelectedVideo] = useState<Video | null>(null);
+  const [selectedVideoIndex, setSelectedVideoIndex] = useState<number | null>(null);
+  const [pausedVideos, setPausedVideos] = useState<Set<string>>(new Set());
   
   // --- STATI FOLLOWER ---
   const [followerCount, setFollowerCount] = useState(0);
@@ -122,9 +127,7 @@ function ProfiloContent() {
   }, []);
 
   const triggerInstallPopup = () => {
-    // Settiamo le interazioni a 3 per forzare il componente PWAInstallPrompt nel layout a svegliarsi
     localStorage.setItem('deep_interactions', '3');
-    // Lanciamo l'evento storage per comunicare con il componente globale
     window.dispatchEvent(new Event('storage'));
   };
 
@@ -134,53 +137,65 @@ function ProfiloContent() {
 
     const loadInitialData = async () => {
       try {
-        console.log('🔄 Avvio caricamento dati profilo e video...');
-        
         const { data: { session }, error: sessionError } = await supabase.auth.getSession();
         
         if (!isMounted) return;
         
         if (sessionError || !session?.user) {
-          console.warn('⚠️ Sessione non valida o scaduta');
           router.push('/auth');
           return;
         }
         
         const userId = session.user.id;
-        console.log('✅ Utente autenticato:', userId);
 
+        // 1. Caricamento Profilo
         const profilePromise = supabase
           .from('profiles')
-          .select('full_name, avatar_url, username, bio, gender, total_oscar_received')
+          .select('id, full_name, avatar_url, username, bio, gender, total_oscar_received')
           .eq('id', userId)
           .single();
 
-        const videoPromise = supabase
-          .from('films')
-          .select('id, video_url, prompt, status, created_at')
+        // 2. Caricamento Video Pubblici (da public_videos come in users/[id])
+        const publicVideoPromise = supabase
+          .from('public_videos')
+          .select('id, video_url, caption, oscar_count, created_at')
           .eq('user_id', userId)
           .order('created_at', { ascending: false });
 
-        const [profileRes, videoRes] = await Promise.all([profilePromise, videoPromise]);
+        // 3. Caricamento Video Privati (Provini)
+        const privateVideoPromise = supabase
+          .from('films')
+          .select('id, video_url, prompt, status, created_at')
+          .eq('user_id', userId)
+          .eq('status', 'privato')
+          .order('created_at', { ascending: false });
+
+        const [profileRes, publicRes, privateRes] = await Promise.all([
+          profilePromise, 
+          publicVideoPromise, 
+          privateVideoPromise
+        ]);
 
         if (!isMounted) return;
 
-        if (profileRes.error) {
-          console.error('❌ Errore Database Profilo:', profileRes.error);
-          if (profileRes.error.code === 'PGRST116') {
-            router.push('/completamento-profilo');
-          }
-        } else {
+        if (profileRes.data) {
           setProfile(profileRes.data);
-          console.log('✅ Profilo caricato correttamente');
         }
 
-        if (videoRes.error) {
-          console.error('❌ Errore Database Video:', videoRes.error);
-        } else {
-          setVideos(videoRes.data || []);
-          console.log(`✅ Caricati ${videoRes.data?.length || 0} video`);
-        }
+        // Mappiamo i dati per avere un formato unico nello stato videos
+        const mappedPublic = (publicRes.data || []).map(v => ({
+          ...v,
+          status: 'pubblico' as const
+        }));
+
+        const mappedPrivate = (privateRes.data || []).map(v => ({
+          ...v,
+          caption: v.prompt, // Mappiamo prompt a caption per l'overlay
+          oscar_count: 0,
+          status: 'privato' as const
+        }));
+
+        setVideos([...mappedPublic, ...mappedPrivate]);
 
         // Carica conteggio follower reale
         const { count: totalFollowers } = await supabase
@@ -190,11 +205,10 @@ function ProfiloContent() {
 
         if (totalFollowers !== null) {
           setFollowerCount(totalFollowers);
-          console.log(`✅ Follower: ${totalFollowers}`);
         }
 
       } catch (err) {
-        console.error('❌ Errore fatale durante init:', err);
+        console.error('❌ Errore durante init:', err);
       } finally {
         if (isMounted) {
           setIsLoading(false);
@@ -310,15 +324,26 @@ function ProfiloContent() {
 
   // --- GESTIONE VIDEO ---
   const handleDeleteVideo = async (videoId: string) => {
-    try {
-      const { error } = await supabase
-        .from('films')
-        .delete()
-        .eq('id', videoId);
+    const confirmDelete = confirm('Sei sicuro di voler eliminare questo video? L\'azione è irreversibile.');
+    if (!confirmDelete) return;
 
-      if (error) throw error;
+    try {
+      // Tenta l'eliminazione da entrambe le tabelle potenziali
+      const { error: error1 } = await supabase.from('public_videos').delete().eq('id', videoId);
+      const { error: error2 } = await supabase.from('films').delete().eq('id', videoId);
+
+      if (error1 && error2) throw new Error("Errore durante l'eliminazione");
 
       setVideos(prev => prev.filter(v => v.id !== videoId));
+      
+      if (selectedVideoIndex !== null) {
+        if (videos.length <= 1) {
+          closeFeedView();
+        } else {
+          setSelectedVideoIndex(prev => (prev! > 0 ? prev! - 1 : 0));
+        }
+      }
+
       setShowDeleteConfirm(null);
       setFeedbackMessage({ type: 'success', text: 'Video eliminato' });
       setTimeout(() => setFeedbackMessage(null), 2000);
@@ -338,16 +363,52 @@ function ProfiloContent() {
     }
   };
 
-  // --- LOGICA UI ---
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
-        setIsMenuOpen(false);
-      }
-    };
-    if (isMenuOpen) document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [isMenuOpen]);
+  // --- GESTIONE FEED OVERLAY (TikTok Style) ---
+  const openFeedView = (index: number) => {
+    setSelectedVideoIndex(index);
+    document.body.style.overflow = 'hidden';
+  };
+
+  const closeFeedView = () => {
+    setSelectedVideoIndex(null);
+    document.body.style.overflow = 'auto';
+  };
+
+  const handleFeedVideoClick = (videoId: string) => {
+    const video = feedVideoRefs.current[videoId];
+    if (!video) return;
+
+    if (video.paused) {
+      video.play();
+      setPausedVideos((prev) => {
+        const newSet = new Set(prev);
+        newSet.delete(videoId);
+        return newSet;
+      });
+    } else {
+      video.pause();
+      setPausedVideos((prev) => {
+        const newSet = new Set(prev);
+        newSet.add(videoId);
+        return newSet;
+      });
+    }
+  };
+
+  const handleShare = async (video: Video) => {
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: `Film di ${profile?.full_name || 'Deep'}`,
+          text: video.caption,
+          url: video.video_url
+        });
+      } catch (err) {}
+    } else {
+      await navigator.clipboard.writeText(video.video_url);
+      alert('Link copiato negli appunti!');
+    }
+  };
 
   const filteredVideos = videos.filter(v => 
     activeTab === 'film' ? v.status === 'pubblico' : v.status === 'privato'
@@ -376,7 +437,7 @@ function ProfiloContent() {
           <AlertCircle className="w-10 h-10 text-zinc-600" />
         </div>
         <h2 className="text-2xl font-bold text-white mb-2">Accesso Negato</h2>
-        <p className="text-zinc-400 mb-8 max-w-xs">Non abbiamo trovato i dati del tuo profilo. Potrebbe essere un problema di sincronizzazione.</p>
+        <p className="text-zinc-400 mb-8 max-w-xs">Non abbiamo trovato i dati del tuo profilo.</p>
         <button
           onClick={() => router.push('/completamento-profilo')}
           className="w-full max-w-xs bg-yellow-400 text-black py-4 rounded-xl font-bold hover:bg-yellow-300 transition-all active:scale-95"
@@ -490,7 +551,6 @@ function ProfiloContent() {
             <div className="flex items-center gap-3 mb-6">
               <span className="text-zinc-400 text-sm">@{profile.username}</span>
               <div className="w-px h-4 bg-zinc-700"></div>
-              {/* MODIFICATA SOLO LA STAMPA DEL GENERE (Legge dal db e fa la prima lettera maiuscola) */}
               <span className="text-zinc-500 text-sm capitalize">{profile.gender || 'Attrice'}</span>
             </div>
 
@@ -519,7 +579,6 @@ function ProfiloContent() {
                 <p className="text-xs text-zinc-500 font-semibold">Follower</p>
               </div>
               <div className="py-5 flex flex-col items-center">
-                {/* Visualizza il "gemello" total_oscar_received dal profilo */}
                 <p className="text-2xl font-bold text-white mb-1">{profile.total_oscar_received || 0} 🏆</p>
                 <p className="text-xs text-zinc-500 font-semibold">Oscar</p>
               </div>
@@ -586,7 +645,8 @@ function ProfiloContent() {
                   {filteredVideos.map((video) => (
                     <div 
                       key={video.id}
-                      className="group relative aspect-[9/16] bg-zinc-900 rounded-2xl overflow-hidden border border-zinc-800 transition-all hover:scale-[1.02] hover:border-zinc-600 hover:shadow-[0_15px_30px_rgba(0,0,0,0.6)]"
+                      onClick={() => openFeedView(videos.indexOf(video))}
+                      className="group relative aspect-[9/16] bg-zinc-900 rounded-xl overflow-hidden border border-zinc-800 transition-all hover:scale-[1.02] hover:border-zinc-600 hover:shadow-[0_15px_30px_rgba(0,0,0,0.6)] cursor-pointer"
                     >
                       <video
                         ref={el => { videoRefs.current[video.id] = el }}
@@ -595,39 +655,9 @@ function ProfiloContent() {
                         loop
                         muted
                         playsInline
-                        onClick={() => toggleVideoPlayback(video.id)}
                       />
                       
-                      {/* OVERLAY INFO */}
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/40 to-transparent opacity-0 group-hover:opacity-100 transition-all duration-300 p-4 flex flex-col justify-end">
-                        <p className="text-[10px] text-white/80 line-clamp-2 italic mb-3">
-                          "{video.prompt}"
-                        </p>
-                        
-                        <div className="flex items-center gap-2">
-                          <button 
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setSelectedVideo(video);
-                            }}
-                            className="flex-1 bg-yellow-400 text-black py-2 rounded-xl font-bold text-[10px] uppercase hover:bg-yellow-300 transition-all active:scale-95"
-                          >
-                            Play
-                          </button>
-                          <button 
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setShowDeleteConfirm(video.id);
-                            }}
-                            className="w-10 h-10 bg-white/10 backdrop-blur-md text-white rounded-xl flex items-center justify-center hover:bg-red-500 transition-all"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </div>
-                      </div>
-
-                      {/* PLAY ICON */}
-                      <div className="absolute inset-0 flex items-center justify-center pointer-events-none group-hover:opacity-0 transition-opacity">
+                      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                           <div className="w-12 h-12 rounded-full bg-black/30 backdrop-blur-sm border border-white/20 flex items-center justify-center">
                             <Play className="w-5 h-5 text-white/60 fill-white/20" />
                           </div>
@@ -650,122 +680,71 @@ function ProfiloContent() {
           </div>
         </section>
 
-        {/* MODAL: MODIFICA PROFILO */}
-        {isEditModalOpen && (
-          <div className="fixed inset-0 z-[1000] bg-black/95 backdrop-blur-xl flex items-center justify-center p-4">
-            <div className="w-full max-w-lg bg-zinc-950 rounded-3xl border border-zinc-800 overflow-hidden shadow-2xl animate-fadeIn">
-              {/* MODAL HEADER */}
-              <div className="px-6 py-5 border-b border-zinc-900 flex items-center justify-between bg-zinc-900/50">
-                <button 
-                  onClick={closeEditModal} 
-                  className="text-zinc-500 hover:text-white font-semibold text-sm transition-colors"
-                  disabled={isSavingProfile}
-                >
-                  Annulla
-                </button>
-                <h3 className="text-white font-bold text-sm">Modifica Profilo</h3>
-                <button 
-                  onClick={saveProfile} 
-                  disabled={isSavingProfile}
-                  className="text-yellow-400 font-bold text-sm hover:text-yellow-300 transition-colors disabled:opacity-40"
-                >
-                  {isSavingProfile ? 'Salvo...' : 'Salva'}
-                </button>
-              </div>
+        {/* FEED OVERLAY TIKTOK STYLE */}
+        {selectedVideoIndex !== null && videos[selectedVideoIndex] && (
+          <div className="fixed inset-0 z-[2000] bg-black flex items-center justify-center">
+            <button
+              onClick={closeFeedView}
+              className="absolute top-4 left-4 z-[2010] w-10 h-10 rounded-full bg-white/10 backdrop-blur-md border border-white/20 flex items-center justify-center"
+            >
+              <X className="w-5 h-5 text-white" />
+            </button>
 
-              <div className="p-6 max-h-[70vh] overflow-y-auto custom-scrollbar">
-                {/* AVATAR PICKER */}
-                <div className="flex flex-col items-center mb-8">
-                  <div className="relative group">
-                    <div className="w-28 h-28 rounded-full overflow-hidden border-2 border-zinc-800 bg-black shadow-xl relative">
-                      {editAvatarPreview ? (
-                        <img src={editAvatarPreview} alt="Preview" className="w-full h-full object-cover" />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center text-zinc-700">
-                          <UserIcon className="w-12 h-12" />
-                        </div>
-                      )}
-                    </div>
-                    <label className="absolute inset-0 flex items-center justify-center bg-black/70 opacity-0 group-hover:opacity-100 transition-all cursor-pointer rounded-full backdrop-blur-sm">
-                      <Upload className="w-6 h-6 text-yellow-400" />
-                      <input type="file" accept="image/*" onChange={handleAvatarChange} className="hidden" />
-                    </label>
+            <div className="relative w-full h-full max-w-[390px] mx-auto flex flex-col bg-black">
+              <div className="h-[70px] bg-black flex items-center px-4 flex-shrink-0">
+                <div className="flex items-center gap-3">
+                  <div className="w-11 h-11 rounded-full overflow-hidden border border-white/80">
+                    {profile.avatar_url && <Image src={profile.avatar_url} alt="av" width={44} height={44} className="object-cover" />}
                   </div>
-                  <p className="mt-4 text-xs font-semibold text-yellow-400">Cambia Foto</p>
-                </div>
-
-                {/* FORM FIELDS */}
-                <div className="space-y-5">
-                  <div className="space-y-2">
-                    <label className="block text-xs font-semibold text-zinc-500">Nome Completo</label>
-                    <input 
-                      type="text"
-                      value={editName}
-                      onChange={(e) => setEditName(e.target.value)}
-                      className="w-full bg-zinc-900 border border-zinc-800 text-white px-4 py-3 rounded-xl focus:outline-none focus:border-yellow-400 focus:ring-1 focus:ring-yellow-400/50 transition-all"
-                      placeholder="Il tuo nome"
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="block text-xs font-semibold text-zinc-500">Username</label>
-                    <div className="relative">
-                      <span className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-600 font-bold">@</span>
-                      <input 
-                        type="text"
-                        value={editUsername}
-                        onChange={(e) => setEditUsername(e.target.value.toLowerCase().replace(/\s/g, ''))}
-                        className="w-full bg-zinc-900 border border-zinc-800 text-white pl-10 pr-4 py-3 rounded-xl focus:outline-none focus:border-yellow-400 focus:ring-1 focus:ring-yellow-400/50 transition-all"
-                        placeholder="username"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="block text-xs font-semibold text-zinc-500">Bio</label>
-                    <textarea 
-                      rows={4}
-                      value={editBio}
-                      onChange={(e) => setEditBio(e.target.value)}
-                      placeholder="Racconta qualcosa di te..."
-                      className="w-full bg-zinc-900 border border-zinc-800 text-white px-4 py-3 rounded-xl focus:outline-none focus:border-yellow-400 focus:ring-1 focus:ring-yellow-400/50 transition-all resize-none text-sm leading-relaxed"
-                    />
-                    <div className="flex justify-end">
-                      <span className={`text-xs font-semibold ${editBio.length > 180 ? 'text-red-500' : 'text-zinc-600'}`}>
-                        {editBio.length}/200
-                      </span>
-                    </div>
+                  <div>
+                    <p className="text-white font-semibold text-base">@{profile.username}</p>
+                    <p className="text-[#D4AF37] font-bold text-xs tracking-wide">REGISTA</p>
                   </div>
                 </div>
               </div>
-            </div>
-          </div>
-        )}
 
-        {/* MODAL: CONFERMA ELIMINAZIONE */}
-        {showDeleteConfirm && (
-          <div className="fixed inset-0 z-[2000] bg-black/95 backdrop-blur-md flex items-center justify-center p-6">
-            <div className="w-full max-w-sm bg-zinc-950 rounded-3xl p-8 border border-zinc-900 text-center shadow-2xl animate-fadeIn">
-              <div className="w-16 h-16 bg-red-500/10 rounded-full flex items-center justify-center mx-auto mb-6 border border-red-500/20">
-                <Trash2 className="w-8 h-8 text-red-500" />
+              <div 
+                className="relative flex-1 w-full overflow-hidden border-y-[0.5px] border-white/5 bg-black cursor-pointer"
+                onClick={() => handleFeedVideoClick(videos[selectedVideoIndex].id)}
+              >
+                <video
+                  ref={(el) => { feedVideoRefs.current[videos[selectedVideoIndex].id] = el; }}
+                  src={videos[selectedVideoIndex].video_url}
+                  className="w-full h-full object-cover"
+                  loop playsInline autoPlay
+                />
+
+                {pausedVideos.has(videos[selectedVideoIndex].id) && (
+                  <div className="absolute inset-0 flex items-center justify-center z-30 bg-black/20">
+                    <Play className="w-12 h-12 text-white/50" />
+                  </div>
+                )}
+
+                <div className="absolute bottom-10 right-4 flex flex-col items-center gap-6 z-40">
+                  <button
+                    onClick={(e) => { e.stopPropagation(); handleDeleteVideo(videos[selectedVideoIndex].id); }}
+                    className="w-12 h-12 rounded-full bg-red-500/80 backdrop-blur-md flex items-center justify-center active:scale-90 transition-transform"
+                  >
+                    <Trash2 className="w-5 h-5 text-white" />
+                  </button>
+
+                  <div className="flex flex-col items-center gap-1">
+                    <div className="text-3xl">🏆</div>
+                    <span className="text-xs font-bold text-[#D4AF37] drop-shadow-[0_2px_8px_rgba(0,0,0,0.9)]">
+                      {videos[selectedVideoIndex].oscar_count || 0}
+                    </span>
+                  </div>
+
+                  <button onClick={(e) => { e.stopPropagation(); handleShare(videos[selectedVideoIndex]); }}>
+                    <Share2 className="w-6 h-6 text-white drop-shadow-[0_2px_8px_rgba(0,0,0,0.9)]" />
+                  </button>
+                </div>
               </div>
-              <h4 className="text-xl font-bold text-white mb-2">Eliminare il video?</h4>
-              <p className="text-zinc-500 text-sm mb-8 leading-relaxed">
-                Questa azione è irreversibile e il contenuto verrà rimosso definitivamente.
-              </p>
-              <div className="space-y-3">
-                <button 
-                  onClick={() => handleDeleteVideo(showDeleteConfirm)}
-                  className="w-full bg-red-600 text-white py-3.5 rounded-xl font-bold text-sm hover:bg-red-500 transition-all active:scale-95"
-                >
-                  Elimina Definitivamente
-                </button>
-                <button 
-                  onClick={() => setShowDeleteConfirm(null)}
-                  className="w-full bg-zinc-900 text-zinc-400 py-3.5 rounded-xl font-semibold text-sm hover:text-white hover:bg-zinc-800 transition-all"
-                >
-                  Annulla
-                </button>
+
+              <div className="h-[70px] bg-black flex items-center px-4 flex-shrink-0">
+                <p className="text-white font-semibold text-sm leading-snug line-clamp-2 italic">
+                  &quot;{videos[selectedVideoIndex].caption}&quot;
+                </p>
               </div>
             </div>
           </div>
@@ -779,28 +758,11 @@ function ProfiloContent() {
       </div>
 
       <style jsx global>{`
-        .custom-scrollbar::-webkit-scrollbar {
-          width: 4px;
-        }
-        .custom-scrollbar::-webkit-scrollbar-track {
-          background: transparent;
-        }
-        .custom-scrollbar::-webkit-scrollbar-thumb {
-          background: #27272a;
-          border-radius: 10px;
-        }
-        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-          background: #3f3f46;
-        }
-        
-        @keyframes fadeIn {
-          from { opacity: 0; transform: translateY(20px); }
-          to { opacity: 1; transform: translateY(0); }
-        }
-        
-        .animate-fadeIn {
-          animation: fadeIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-        }
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #27272a; border-radius: 10px; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+        .animate-fadeIn { animation: fadeIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
       `}</style>
     </main>
   );
@@ -808,8 +770,6 @@ function ProfiloContent() {
 
 /**
  * WRAPPER DI ESPORTAZIONE
- * Questo è il fix per l'errore di Vercel: avvolgiamo il componente
- * che usa useSearchParams in un Boundary Suspense.
  */
 export default function ProfiloPage() {
   return (
