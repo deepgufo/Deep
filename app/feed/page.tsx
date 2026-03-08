@@ -11,7 +11,9 @@ import {
   AlertCircle,
   Loader2,
   Flag,
-  Play
+  Play,
+  X,
+  CheckCircle2
 } from 'lucide-react';
 import Image from 'next/image';
 import PWAInstallPrompt from '../components/PWAInstallPrompt';
@@ -54,6 +56,12 @@ export default function FeedPage() {
   const [pausedVideos, setPausedVideos] = useState<Set<string>>(new Set());
   const [confettiActive, setConfettiActive] = useState<string | null>(null);
   const [expandedPosts, setExpandedPosts] = useState<Set<string>>(new Set());
+
+  // Stati Segnalazione
+  const [reportingPostId, setReportingPostId] = useState<string | null>(null);
+  const [reportReason, setReportReason] = useState('');
+  const [isReporting, setIsReporting] = useState(false);
+  const [feedbackMessage, setFeedbackMessage] = useState<{type: 'success' | 'error', text: string} | null>(null);
 
   // Refs per video, intersection observer e paginazione
   const videoRefs = useRef<{ [key: string]: HTMLVideoElement | null }>({});
@@ -311,6 +319,46 @@ export default function FeedPage() {
     }
   };
 
+  // --- GESTIONE SEGNALAZIONE ---
+  const handleReportSubmit = async () => {
+    if (!currentUserId) {
+      alert('Devi effettuare il login per segnalare un video');
+      router.push('/auth');
+      return;
+    }
+
+    if (!reportReason.trim()) {
+      alert('Inserisci una motivazione per la segnalazione');
+      return;
+    }
+
+    setIsReporting(true);
+    try {
+      const { error } = await supabase
+        .from('reports')
+        .insert({
+          reporter_id: currentUserId,
+          video_id: reportingPostId,
+          reason: reportReason,
+          status: 'pending'
+        });
+
+      if (error) throw error;
+
+      setFeedbackMessage({ type: 'success', text: 'Segnalazione inviata. Grazie.' });
+      setReportingPostId(null);
+      setReportReason('');
+      
+      setTimeout(() => setFeedbackMessage(null), 3000);
+    } catch (err: any) {
+      console.error('❌ Errore segnalazione:', err.message);
+      setFeedbackMessage({ type: 'error', text: 'Impossibile inviare la segnalazione.' });
+      setTimeout(() => setFeedbackMessage(null), 3000);
+    } finally {
+      setIsReporting(false);
+    }
+  };
+
   // --- TOGGLE PLAY/PAUSE ---
   const handleVideoClick = (postId: string) => {
     const video = videoRefs.current[postId];
@@ -388,6 +436,16 @@ export default function FeedPage() {
 
   return (
     <main className="fixed inset-0 bg-[#000000]">
+      {/* FEEDBACK OVERLAY */}
+      {feedbackMessage && (
+        <div className={`fixed top-20 left-1/2 -translate-x-1/2 z-[3000] px-6 py-3 rounded-full shadow-2xl flex items-center gap-3 animate-bounce ${
+          feedbackMessage.type === 'success' ? 'bg-green-500' : 'bg-red-500'
+        }`}>
+          {feedbackMessage.type === 'success' ? <CheckCircle2 className="w-5 h-5 text-white" /> : <AlertCircle className="w-5 h-5 text-white" />}
+          <span className="font-bold text-sm text-white uppercase">{feedbackMessage.text}</span>
+        </div>
+      )}
+
       <header className="fixed top-0 left-0 right-0 z-50 bg-black/90 backdrop-blur-xl border-b border-white/5">
         <div className="max-w-md mx-auto flex items-center justify-center gap-8 px-4 py-2.5">
           <button
@@ -480,7 +538,7 @@ export default function FeedPage() {
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
-                            alert('Funzione segnalazione in sviluppo');
+                            setReportingPostId(post.id);
                             setOpenMenuId(null);
                           }}
                           className="w-full flex items-center gap-3 px-4 py-3 text-left text-red-400 hover:bg-red-500/10 transition-colors"
@@ -610,7 +668,43 @@ export default function FeedPage() {
         )}
       </div>
 
-      {/* POP-UP PWA TRIGGERATO DOPO 3 VIDEO */}
+      {/* MODALE SEGNALAZIONE */}
+      {reportingPostId && (
+        <div className="fixed inset-0 z-[4000] flex items-center justify-center p-6 animate-fadeIn">
+          <div className="absolute inset-0 bg-black/80 backdrop-blur-sm" onClick={() => setReportingPostId(null)} />
+          <div className="relative w-full max-w-sm bg-zinc-950 border border-zinc-800 rounded-3xl overflow-hidden shadow-2xl">
+            <div className="p-6">
+              <div className="flex items-center justify-between mb-6">
+                <h3 className="text-lg font-bold text-white">Segnala Contenuto</h3>
+                <button onClick={() => setReportingPostId(null)} className="p-1 text-zinc-500 hover:text-white">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <p className="text-sm text-zinc-400 mb-4">
+                Aiutaci a capire cosa non va. La tua segnalazione sarà esaminata dal team di Deep.
+              </p>
+
+              <textarea
+                value={reportReason}
+                onChange={(e) => setReportReason(e.target.value)}
+                placeholder="Perché stai segnalando questo video?"
+                className="w-full h-32 bg-zinc-900 border border-zinc-800 rounded-2xl p-4 text-sm text-white focus:outline-none focus:border-red-500 transition-colors resize-none mb-6"
+              />
+
+              <button
+                onClick={handleReportSubmit}
+                disabled={isReporting || !reportReason.trim()}
+                className="w-full py-4 bg-red-600 hover:bg-red-700 disabled:opacity-50 disabled:hover:bg-red-600 text-white font-bold rounded-2xl transition-all active:scale-95 flex items-center justify-center gap-2"
+              >
+                {isReporting ? <Loader2 className="w-5 h-5 animate-spin" /> : 'CONFERMA SEGNALAZIONE'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* POP-UP PWA TRIGGERATO DOPO 30 SECONDI */}
       <PWAInstallPrompt />
 
       <style jsx global>{`

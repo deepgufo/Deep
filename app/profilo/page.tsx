@@ -376,7 +376,7 @@ function ProfiloContent() {
       setShowDeleteConfirm(null);
       setFeedbackMessage({ type: 'success', text: 'Video eliminato' });
       
-      // 3. Forza Next.js a rinfrescare i dati server-side
+      // 3. IMPORTANTISSIMO: Forza Next.js a rinfrescare i dati server-side
       router.refresh();
 
       setTimeout(() => setFeedbackMessage(null), 2000);
@@ -605,7 +605,7 @@ function ProfiloContent() {
     <main className="fixed inset-0 bg-black text-white font-sans selection:bg-yellow-400/30">
       {/* FEEDBACK OVERLAY */}
       {feedbackMessage && (
-        <div className={`fixed top-20 left-1/2 -translate-x-1/2 z-[2000] px-6 py-3 rounded-full shadow-2xl flex items-center gap-3 animate-bounce ${
+        <div className={`fixed top-20 left-1/2 -translate-x-1/2 z-[5000] px-6 py-3 rounded-full shadow-2xl flex items-center gap-3 animate-bounce ${
           feedbackMessage.type === 'success' ? 'bg-green-500' : 'bg-red-500'
         }`}>
           {feedbackMessage.type === 'success' ? <CheckCircle2 className="w-5 h-5" /> : <AlertCircle className="w-5 h-5" />}
@@ -895,9 +895,101 @@ function ProfiloContent() {
           </div>
         )}
 
-        {/* MODAL: CONFERMA ELIMINAZIONE */}
+        {/* MODAL: MODIFICA PROFILO (HIGH Z-INDEX) */}
+        {isEditModalOpen && (
+          <div className="fixed inset-0 z-[4000] bg-black/95 backdrop-blur-xl flex items-center justify-center p-4">
+            <div className="w-full max-w-lg bg-zinc-950 rounded-3xl border border-zinc-800 overflow-hidden shadow-2xl animate-fadeIn">
+              {/* MODAL HEADER */}
+              <div className="px-6 py-5 border-b border-zinc-900 flex items-center justify-between bg-zinc-900/50">
+                <button 
+                  onClick={closeEditModal} 
+                  className="text-zinc-500 hover:text-white font-semibold text-sm transition-colors"
+                  disabled={isSavingProfile}
+                >
+                  Annulla
+                </button>
+                <h3 className="text-white font-bold text-sm">Modifica Profilo</h3>
+                <button 
+                  onClick={saveProfile} 
+                  disabled={isSavingProfile}
+                  className="text-yellow-400 font-bold text-sm hover:text-yellow-300 transition-colors disabled:opacity-40"
+                >
+                  {isSavingProfile ? 'Salvo...' : 'Salva'}
+                </button>
+              </div>
+
+              <div className="p-6 max-h-[70vh] overflow-y-auto custom-scrollbar">
+                {/* AVATAR PICKER */}
+                <div className="flex flex-col items-center mb-8">
+                  <div className="relative group">
+                    <div className="w-28 h-28 rounded-full overflow-hidden border-2 border-zinc-800 bg-black shadow-xl relative">
+                      {editAvatarPreview ? (
+                        <img src={editAvatarPreview} alt="Preview" className="w-full h-full object-cover" />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center text-zinc-700">
+                          <UserIcon className="w-12 h-12" />
+                        </div>
+                      )}
+                    </div>
+                    <label className="absolute inset-0 flex items-center justify-center bg-black/70 opacity-0 group-hover:opacity-100 transition-all cursor-pointer rounded-full backdrop-blur-sm">
+                      <Upload className="w-6 h-6 text-yellow-400" />
+                      <input type="file" accept="image/*" onChange={handleAvatarChange} className="hidden" />
+                    </label>
+                  </div>
+                  <p className="mt-4 text-xs font-semibold text-yellow-400">Cambia Foto</p>
+                </div>
+
+                {/* FORM FIELDS */}
+                <div className="space-y-5">
+                  <div className="space-y-2">
+                    <label className="block text-xs font-semibold text-zinc-500">Nome Completo</label>
+                    <input 
+                      type="text"
+                      value={editName}
+                      onChange={(e) => setEditName(e.target.value)}
+                      className="w-full bg-zinc-900 border border-zinc-800 text-white px-4 py-3 rounded-xl focus:outline-none focus:border-yellow-400 focus:ring-1 focus:ring-yellow-400/50 transition-all"
+                      placeholder="Il tuo nome"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="block text-xs font-semibold text-zinc-500">Username</label>
+                    <div className="relative">
+                      <span className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-600 font-bold">@</span>
+                      <input 
+                        type="text"
+                        value={editUsername}
+                        onChange={(e) => setEditUsername(e.target.value.toLowerCase().replace(/\s/g, ''))}
+                        className="w-full bg-zinc-900 border border-zinc-800 text-white pl-10 pr-4 py-3 rounded-xl focus:outline-none focus:border-yellow-400 focus:ring-1 focus:ring-yellow-400/50 transition-all"
+                        placeholder="username"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="block text-xs font-semibold text-zinc-500">Bio</label>
+                    <textarea 
+                      rows={4}
+                      value={editBio}
+                      onChange={(e) => setEditBio(e.target.value)}
+                      placeholder="Racconta qualcosa di te..."
+                      className="w-full bg-zinc-900 border border-zinc-800 text-white px-4 py-3 rounded-xl focus:outline-none focus:border-yellow-400 focus:ring-1 focus:ring-yellow-400/50 transition-all resize-none text-sm leading-relaxed"
+                    />
+                    <div className="flex justify-end">
+                      <span className={`text-xs font-semibold ${editBio.length > 180 ? 'text-red-500' : 'text-zinc-600'}`}>
+                        {editBio.length}/200
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* MODAL: CONFERMA ELIMINAZIONE (HIGHEST Z-INDEX) */}
         {showDeleteConfirm && (
-          <div className="fixed inset-0 z-[3000] bg-black/95 backdrop-blur-md flex items-center justify-center p-6">
+          <div className="fixed inset-0 z-[5000] bg-black/95 backdrop-blur-md flex items-center justify-center p-6">
             <div className="w-full max-w-sm bg-zinc-950 rounded-3xl p-8 border border-zinc-900 text-center shadow-2xl animate-fadeIn">
               <div className="w-16 h-16 bg-red-500/10 rounded-full flex items-center justify-center mx-auto mb-6 border border-red-500/20">
                 <Trash2 className="w-8 h-8 text-red-500" />
