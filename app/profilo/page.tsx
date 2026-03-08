@@ -216,7 +216,7 @@ function ProfiloContent() {
         // Mappatura video privati
         const mappedPrivate = (privateRes.data || []).map(v => ({
           ...v,
-          caption: v.prompt,
+          caption: v.prompt, // Mappiamo prompt a caption per coerenza overlay
           oscar_count: 0,
           has_user_liked: false,
           status: 'privato' as const
@@ -224,6 +224,7 @@ function ProfiloContent() {
 
         setVideos([...mappedPublic, ...mappedPrivate]);
 
+        // Carica conteggio follower reale
         const { count: totalFollowers } = await supabase
           .from('follows')
           .select('*', { count: 'exact', head: true })
@@ -231,6 +232,7 @@ function ProfiloContent() {
 
         if (totalFollowers !== null) {
           setFollowerCount(totalFollowers);
+          console.log(`✅ Follower: ${totalFollowers}`);
         }
 
       } catch (err) {
@@ -348,16 +350,19 @@ function ProfiloContent() {
     }
   };
 
-  // --- GESTIONE VIDEO ---
+  // --- GESTIONE VIDEO (FIXED DELETE WITH MODAL) ---
   const handleDeleteVideo = async (videoId: string) => {
-    const confirmDelete = confirm('Sei sicuro di voler eliminare questo video?');
-    if (!confirmDelete) return;
-
     try {
-      // Tentativo di eliminazione da entrambe le tabelle potenziali
-      const { error: error1 } = await supabase.from('public_videos').delete().eq('id', videoId);
-      const { error: error2 } = await supabase.from('films').delete().eq('id', videoId);
+      // 1. Tentativo di eliminazione reale sul database (entrambe le tabelle)
+      const { error: errorPublic } = await supabase.from('public_videos').delete().eq('id', videoId);
+      const { error: errorFilms } = await supabase.from('films').delete().eq('id', videoId);
 
+      // Se entrambi restituiscono errore (es. RLS bloccata), segnaliamo il fallimento
+      if (errorPublic && errorFilms) {
+        throw new Error("Il database ha rifiutato l'eliminazione. Controlla i permessi.");
+      }
+
+      // 2. Aggiorniamo lo stato locale solo dopo la conferma del DB
       setVideos(prev => prev.filter(v => v.id !== videoId));
       
       if (selectedVideoIndex !== null) {
@@ -370,9 +375,14 @@ function ProfiloContent() {
 
       setShowDeleteConfirm(null);
       setFeedbackMessage({ type: 'success', text: 'Video eliminato' });
+      
+      // 3. Forza Next.js a rinfrescare i dati server-side
+      router.refresh();
+
       setTimeout(() => setFeedbackMessage(null), 2000);
-    } catch (err) {
-      alert("Errore durante l'eliminazione");
+    } catch (err: any) {
+      console.error('❌ Errore eliminazione:', err);
+      alert(err.message || "Errore durante l'eliminazione");
     }
   };
 
@@ -413,6 +423,7 @@ function ProfiloContent() {
         ));
         setIsFlyingId(null);
         setFeedbackMessage({ type: 'success', text: 'Video pubblicato nel Feed!' });
+        router.refresh(); // Sincronizza cache server
       }, 800);
 
       setTimeout(() => setFeedbackMessage(null), 3000);
@@ -828,7 +839,7 @@ function ProfiloContent() {
                 {/* SIDEBAR INTERAZIONI (DESTRA) */}
                 <div className="absolute bottom-4 right-4 flex flex-col items-center gap-4 z-40">
                   <button 
-                    onClick={(e) => { e.stopPropagation(); handleDeleteVideo(videos[selectedVideoIndex].id); }} 
+                    onClick={(e) => { e.stopPropagation(); setShowDeleteConfirm(videos[selectedVideoIndex].id); }} 
                     className="flex flex-col items-center gap-1 group"
                   >
                     <div className="w-12 h-12 rounded-full bg-red-500/80 backdrop-blur-md flex items-center justify-center active:scale-90 transition-transform">
@@ -879,6 +890,35 @@ function ProfiloContent() {
                     Rendi Pubblico
                   </button>
                 )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* MODAL: CONFERMA ELIMINAZIONE */}
+        {showDeleteConfirm && (
+          <div className="fixed inset-0 z-[3000] bg-black/95 backdrop-blur-md flex items-center justify-center p-6">
+            <div className="w-full max-w-sm bg-zinc-950 rounded-3xl p-8 border border-zinc-900 text-center shadow-2xl animate-fadeIn">
+              <div className="w-16 h-16 bg-red-500/10 rounded-full flex items-center justify-center mx-auto mb-6 border border-red-500/20">
+                <Trash2 className="w-8 h-8 text-red-500" />
+              </div>
+              <h4 className="text-xl font-bold text-white mb-2">Sei sicuro di voler cancellare il video?</h4>
+              <p className="text-zinc-500 text-sm mb-8 leading-relaxed">
+                Questa azione è irreversibile e il contenuto verrà rimosso definitivamente dal database.
+              </p>
+              <div className="space-y-3">
+                <button 
+                  onClick={() => handleDeleteVideo(showDeleteConfirm)}
+                  className="w-full bg-red-600 text-white py-3.5 rounded-xl font-bold text-sm hover:bg-red-500 transition-all active:scale-95"
+                >
+                  Conferma
+                </button>
+                <button 
+                  onClick={() => setShowDeleteConfirm(null)}
+                  className="w-full bg-zinc-900 text-zinc-400 py-3.5 rounded-xl font-semibold text-sm hover:text-white hover:bg-zinc-800 transition-all"
+                >
+                  Annulla
+                </button>
               </div>
             </div>
           </div>
