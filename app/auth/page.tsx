@@ -75,14 +75,11 @@ export default function AuthPage() {
     }
     
     const emailLower = email.toLowerCase();
-    const isSchoolEmail = email.endsWith('.it') && 
-      (emailLower.includes('studenti') || 
-       emailLower.includes('scuola') || 
-       emailLower.includes('istituto') || 
-       emailLower.includes('liceo'));
+    // MODIFICA: Controllo specifico per il dominio richiesto
+    const isSchoolEmail = emailLower.endsWith('@fermipolomontale.edu.it');
     
     if (!isSchoolEmail) {
-      setEmailWarning('Consigliamo di usare la tua email scolastica per entrare nel club');
+      setEmailWarning('Devi usare la tua email @fermipolomontale.edu.it per accedere');
     } else {
       setEmailWarning('');
     }
@@ -92,6 +89,12 @@ export default function AuthPage() {
     e.preventDefault();
     setError('');
     
+    // MODIFICA: Blocco registrazione se il dominio non è corretto
+    if (!signupEmail.toLowerCase().endsWith('@fermipolomontale.edu.it')) {
+      setError('Registrazione consentita solo con email @fermipolomontale.edu.it');
+      return;
+    }
+
     if (signupPassword.length < 6) {
       setError('La password deve contenere almeno 6 caratteri');
       return;
@@ -137,6 +140,13 @@ export default function AuthPage() {
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+
+    // MODIFICA: Blocco login se il dominio non è corretto
+    if (!loginEmail.toLowerCase().endsWith('@fermipolomontale.edu.it')) {
+      setError('Accesso consentito solo con email @fermipolomontale.edu.it');
+      return;
+    }
+
     setIsLoading(true);
     
     try {
@@ -294,12 +304,13 @@ export default function AuthPage() {
                   value={loginEmail}
                   onChange={(e) => setLoginEmail(e.target.value)}
                   className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-yellow-400/50 focus:ring-2 focus:ring-yellow-400/20 transition-all"
-                  placeholder="tua@email.com"
+                  placeholder="nome.cognome@fermipolomontale.edu.it"
                   required
                   disabled={isLoading}
                 />
               </div>
 
+              {/* Password field */}
               <div>
                 <label className="block text-sm font-medium text-gray-300 mb-2">Password</label>
                 <input
@@ -355,7 +366,7 @@ export default function AuthPage() {
                     checkEmailType(e.target.value);
                   }}
                   className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-yellow-400/50 focus:ring-2 focus:ring-yellow-400/20 transition-all"
-                  placeholder="tua@email.com"
+                  placeholder="nome.cognome@fermipolomontale.edu.it"
                   required
                   disabled={isLoading}
                 />
