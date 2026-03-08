@@ -5,6 +5,7 @@ import LayoutWrapper from "./components/LayoutWrapper";
 import PWARegister from "./components/PWARegister";
 import { ActivityTracker } from "./components/ActivityTracker";
 import PWAInstallPrompt from "./components/PWAInstallPrompt";
+import { SpeedInsights } from "@vercel/speed-insights/next";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -110,6 +111,7 @@ export default function RootLayout({
         <PWARegister />
         <ActivityTracker />
         <PWAInstallPrompt />
+        <SpeedInsights />
         <LayoutWrapper>{children}</LayoutWrapper>
       </body>
     </html>

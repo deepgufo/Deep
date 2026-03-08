@@ -25,7 +25,7 @@ export default function ProgressiPage() {
   const [isLoading, setIsLoading] = useState(true);
 
   // --- CONFIGURAZIONE ANONIMATO ---
-  const ADMIN_UUID = "d9364dcd-ceba-4120-9ace-57ce5c1612d8"; 
+  const ADMIN_UUID = "856aa039-ae5a-450e-9223-cf48496e5555"; 
 
   useEffect(() => {
     const checkAdmin = async () => {
