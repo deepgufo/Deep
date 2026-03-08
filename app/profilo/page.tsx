@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { supabase, supabaseAdmin } from '@/lib/supabase';
+import { supabase } from '@/lib/supabase';
 import { 
   Camera, 
   X, 
@@ -296,17 +296,17 @@ function ProfiloContent() {
 
       let avatarUrl = profile.avatar_url;
 
-      if (editAvatarFile && supabaseAdmin) {
+      if (editAvatarFile) {
         const fileExt = editAvatarFile.name.split('.').pop();
         const fileName = `${session.user.id}-${Date.now()}.${fileExt}`;
 
-        const { error: uploadError } = await supabaseAdmin.storage
+        const { error: uploadError } = await supabase.storage
           .from('avatars')
           .upload(fileName, editAvatarFile, { upsert: true });
 
         if (uploadError) throw uploadError;
 
-        const { data: urlData } = supabaseAdmin.storage
+        const { data: urlData } = supabase.storage
           .from('avatars')
           .getPublicUrl(fileName);
 
@@ -322,9 +322,8 @@ function ProfiloContent() {
         updated_at: new Date().toISOString()
       };
 
-      if (!supabaseAdmin) throw new Error("Service Role non configurato");
-
-      const { error: updateError } = await supabaseAdmin
+      // MODIFICA: Usiamo il client standard 'supabase' al posto di 'supabaseAdmin'
+      const { error: updateError } = await supabase
         .from('profiles')
         .upsert(updatedData);
 
@@ -791,7 +790,6 @@ function ProfiloContent() {
               <X className="w-5 h-5 text-white" />
             </button>
 
-            {/* Container principale alzato per non finire sotto la bottom-nav dello smartphone */}
             <div className="relative w-full h-full max-w-[390px] mx-auto flex flex-col bg-black pb-[80px]">
               
               {/* HEADER UTENTE (70px) */}
