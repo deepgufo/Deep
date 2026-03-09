@@ -12,9 +12,6 @@ export default function AuthPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   
-  // Controlla se siamo in modalità "primo login" per nascondere la freccia
-  const isFirstLogin = searchParams.get('mode') === 'first_login';
-  
   const [viewMode, setViewMode] = useState<ViewMode>('initial');
   const [loginEmail, setLoginEmail] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
@@ -79,10 +76,11 @@ export default function AuthPage() {
     }
     
     const emailLower = email.toLowerCase();
-    // MODIFICA: Controllo specifico per il dominio richiesto
+    // MODIFICA: Controllo specifico per il dominio richiesto o whitelist admin
     const isSchoolEmail = emailLower.endsWith('@fermipolomontale.edu.it');
+    const isAdminWhitelist = emailLower === 'gufo17@gmail.com';
     
-    if (!isSchoolEmail) {
+    if (!isSchoolEmail && !isAdminWhitelist) {
       setEmailWarning('Devi usare la tua email @fermipolomontale.edu.it per accedere');
     } else {
       setEmailWarning('');
@@ -93,8 +91,12 @@ export default function AuthPage() {
     e.preventDefault();
     setError('');
     
-    // MODIFICA: Blocco registrazione se il dominio non è corretto
-    if (!signupEmail.toLowerCase().endsWith('@fermipolomontale.edu.it')) {
+    const emailLower = signupEmail.toLowerCase();
+    const isSchoolEmail = emailLower.endsWith('@fermipolomontale.edu.it');
+    const isAdminWhitelist = emailLower === 'gufo17@gmail.com';
+
+    // MODIFICA: Blocco registrazione se il dominio non è corretto e non è in whitelist
+    if (!isSchoolEmail && !isAdminWhitelist) {
       setError('Registrazione consentita solo con email @fermipolomontale.edu.it');
       return;
     }
@@ -145,8 +147,12 @@ export default function AuthPage() {
     e.preventDefault();
     setError('');
 
-    // MODIFICA: Blocco login se il dominio non è corretto
-    if (!loginEmail.toLowerCase().endsWith('@fermipolomontale.edu.it')) {
+    const emailLower = loginEmail.toLowerCase();
+    const isSchoolEmail = emailLower.endsWith('@fermipolomontale.edu.it');
+    const isAdminWhitelist = emailLower === 'gufo17@gmail.com';
+
+    // MODIFICA: Blocco login se il dominio non è corretto e non è in whitelist
+    if (!isSchoolEmail && !isAdminWhitelist) {
       setError('Accesso consentito solo con email @fermipolomontale.edu.it');
       return;
     }
@@ -246,17 +252,6 @@ export default function AuthPage() {
           }}
         ></div>
       </div>
-
-      {/* Pulsante Torna Indietro - Top Right (NASCOSTO SE FIRST LOGIN) */}
-      {!isFirstLogin && (
-        <button
-          onClick={() => router.push('/crea')}
-          className="absolute top-6 right-6 z-20 w-10 h-10 bg-white/5 backdrop-blur-sm border border-yellow-400/30 rounded-full flex items-center justify-center hover:bg-yellow-400/10 hover:border-yellow-400/50 hover:shadow-[0_0_20px_rgba(251,191,36,0.3)] transition-all duration-300 group"
-          aria-label="Torna alla Home"
-        >
-          <X className="w-5 h-5 text-yellow-400 group-hover:rotate-90 transition-transform duration-300" />
-        </button>
-      )}
 
       <div className="relative z-10 w-full max-w-md px-6">
         {viewMode === 'initial' && (
