@@ -315,7 +315,7 @@ export default function CreaPage() {
         <div className="absolute top-[-10%] left-[-10%] w-[50vw] h-[50vw] bg-[#2A0845] opacity-20 rounded-full blur-[100px] pointer-events-none" />
         <div className="absolute bottom-[10%] right-[-10%] w-[60vw] h-[60vw] bg-[#001B3A] opacity-30 rounded-full blur-[120px] pointer-events-none" />
 
-        <div className="relative z-10 w-full max-w-md mx-auto h-full flex flex-col justify-between">
+        <div className="relative z-10 w-full max-md mx-auto h-full flex flex-col justify-between">
           
           <div className="flex-shrink-0 animate-fadeIn relative flex justify-between items-center mb-4">
             
@@ -381,6 +381,7 @@ export default function CreaPage() {
           </div>
 
           <div className="flex-1 flex flex-col justify-center animate-fadeIn delay-300 mt-4 mb-4">
+            <p className="text-[11px] font-bold text-zinc-500 uppercase tracking-widest mb-2 pl-1">POV di esempio:</p>
             <div className="grid grid-cols-2 gap-3 h-full max-h-[190px]">
               {currentSuggestions.slice(0, 3).map((suggestion, index) => (
                 <button

@@ -28,7 +28,7 @@ export default function PWAInstallPrompt() {
     const checkTriggers = () => {
       const interactions = parseInt(localStorage.getItem('deep_interactions') || '0');
       
-      // BLOCCO 48 ORE RIMOSSO PER SEMPRE: Ora il controllo è puramente sulle interazioni (timer)
+      // Il trigger scatta quando le interazioni raggiungono 3 (impostato dal timer di 15s o 30s)
       if (interactions >= 3) {
         setShowPrompt(true);
       }
@@ -43,24 +43,21 @@ export default function PWAInstallPrompt() {
 
     window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
     
-    // IMPORTANTE: Ascoltiamo i cambiamenti del localStorage lanciati dai timer nel Feed/Finalizzazione
+    // Ascolta i cambiamenti del localStorage lanciati dai timer nelle altre pagine
     window.addEventListener('storage', checkTriggers);
     
-    // Controllo al caricamento e dopo un breve delay per sicurezza
+    // Controllo immediato al caricamento
     checkTriggers();
-    const safetyTimeout = setTimeout(checkTriggers, 3000);
 
     return () => {
       window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
       window.removeEventListener('storage', checkTriggers);
-      clearTimeout(safetyTimeout);
     };
   }, []);
 
   const closePrompt = () => {
-    // Resettiamo il contatore per permettere al timer di ripartire alla prossima sessione
+    // Resettiamo il contatore per non mostrare il prompt continuamente nella stessa sessione
     localStorage.setItem('deep_interactions', '0');
-    localStorage.setItem('pwa_prompt_last_shown', Date.now().toString());
     setShowPrompt(false);
   };
 
@@ -70,7 +67,7 @@ export default function PWAInstallPrompt() {
     const { outcome } = await deferredPrompt.userChoice;
     if (outcome === 'accepted') {
       localStorage.setItem('deep_interactions', '0');
-      closePrompt();
+      setShowPrompt(false);
     }
     setDeferredPrompt(null);
   };
@@ -125,7 +122,7 @@ export default function PWAInstallPrompt() {
               </div>
             </div>
           ) : (
-            /* BOTTONE PER ANDROID */
+            /* BOTTONE PER ANDROID / CHROME */
             <button 
               onClick={handleAndroidInstall}
               className="w-full py-4 bg-[#FFCC00] text-black font-black rounded-2xl flex items-center justify-center gap-2 active:scale-[0.98] transition-all shadow-[0_10px_30px_rgba(255,204,0,0.15)]"
