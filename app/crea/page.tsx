@@ -357,7 +357,7 @@ export default function CreaPage() {
                 <textarea
                   value={prompt}
                   onChange={(e) => handlePromptChange(e.target.value)}
-                  placeholder="Scrivi la tua pazzia qui..."
+                  placeholder="Scrivi il tuo POV del giorno qui..."
                   className="w-full h-full bg-transparent border-none px-4 py-3.5 text-white placeholder-[#4B5563] focus:outline-none resize-none text-[15px] leading-relaxed"
                   maxLength={150}
                 />

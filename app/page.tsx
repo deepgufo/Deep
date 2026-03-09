@@ -2,16 +2,25 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { supabase } from '@/lib/supabase';
 
 export default function SplashScreen() {
   const router = useRouter();
   const [isAnimating, setIsAnimating] = useState(true);
 
   useEffect(() => {
-    // Mostra lo splash, poi redirect automatico alla pagina principale
-    const timer = setTimeout(() => {
+    // Gestione del timer estetico unita al controllo della sessione
+    const timer = setTimeout(async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      
       setIsAnimating(false);
-      router.push('/crea');
+      
+      // Se l'utente è loggato va alla creazione, altrimenti deve autenticarsi
+      if (session) {
+        router.push('/crea');
+      } else {
+        router.push('/auth');
+      }
     }, 1500); // 1.5 secondi di permanenza
 
     return () => clearTimeout(timer);
