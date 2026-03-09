@@ -304,7 +304,7 @@ export default function AuthPage() {
                   value={loginEmail}
                   onChange={(e) => setLoginEmail(e.target.value)}
                   className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-yellow-400/50 focus:ring-2 focus:ring-yellow-400/20 transition-all"
-                  placeholder="nome.cognome@fermipolomontale.edu.it"
+                  placeholder="cognome.nome@fermipolomontale.edu.it"
                   required
                   disabled={isLoading}
                 />
@@ -366,7 +366,7 @@ export default function AuthPage() {
                     checkEmailType(e.target.value);
                   }}
                   className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-yellow-400/50 focus:ring-2 focus:ring-yellow-400/20 transition-all"
-                  placeholder="nome.cognome@fermipolomontale.edu.it"
+                  placeholder="cognome.nome@fermipolomontale.edu.it"
                   required
                   disabled={isLoading}
                 />
