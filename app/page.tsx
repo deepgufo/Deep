@@ -16,10 +16,11 @@ export default function SplashScreen() {
       setIsAnimating(false);
       
       // Se l'utente è loggato va alla creazione, altrimenti deve autenticarsi
+      // Modificato: aggiunta segnalazione per nascondere la freccia in auth
       if (session) {
         router.push('/crea');
       } else {
-        router.push('/auth');
+        router.push('/auth?mode=first_login');
       }
     }, 1500); // 1.5 secondi di permanenza
 
