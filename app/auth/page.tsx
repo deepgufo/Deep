@@ -1,16 +1,15 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
-import { X, Mail, ArrowRight, CheckCircle2, Loader2 } from 'lucide-react';
+import { Mail, ArrowRight, CheckCircle2, Loader2 } from 'lucide-react';
 import Link from 'next/link';
 
 type ViewMode = 'initial' | 'login' | 'signup';
 
 export default function AuthPage() {
   const router = useRouter();
-  const searchParams = useSearchParams();
   
   const [viewMode, setViewMode] = useState<ViewMode>('initial');
   const [loginEmail, setLoginEmail] = useState('');
@@ -311,7 +310,6 @@ export default function AuthPage() {
                 />
               </div>
 
-              {/* Password field */}
               <div>
                 <label className="block text-sm font-medium text-gray-300 mb-2">Password</label>
                 <input
