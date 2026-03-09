@@ -128,10 +128,9 @@ export default function FinalizzazioneClient({
   useEffect(() => {
     if (finalVideoUrl && !isLoading) {
       const pwaTimer = setTimeout(() => {
-        // Incrementiamo forzatamente le interazioni per soddisfare la logica interna del componente PWA
         localStorage.setItem('deep_interactions', '3');
         setShowPWAPopup(true);
-      }, 15000); // 15 secondi
+      }, 15000); 
 
       return () => clearTimeout(pwaTimer);
     }
@@ -163,7 +162,6 @@ export default function FinalizzazioneClient({
       const storedPredictionId = localStorage.getItem('predictionId');
 
       if (!storedPredictionId) {
-        console.log("⏱️ Nessun ID produzione trovato. Attendo o Errore.");
         if (!currentVideoUrl) {
            setError("Dati mancanti per avviare la produzione.");
            setIsLoading(false);
@@ -179,8 +177,6 @@ export default function FinalizzazioneClient({
         if (authError || !user) {
           throw new Error("Sessione non valida. Effettua nuovamente il login.");
         }
-
-        console.log("--- RIPRESA PRODUZIONE DA ID ESISTENTE: ", storedPredictionId);
         
         const predictionId = storedPredictionId;
         setProgress(10);
@@ -194,17 +190,18 @@ export default function FinalizzazioneClient({
             }
 
             const prediction = await checkRes.json();
-            console.log("Stato Replicate:", prediction.status);
 
             if (prediction.status === 'succeeded') {
               clearInterval(pollInterval);
               clearInterval(msgInterval);
               
+              // TRACCIAMENTO: Il video è pronto e l'utente lo sta per vedere
+              await trackSatisfactionEvent('video_ready');
+              
               setTimeout(() => {
                 setFinalVideoUrl(prediction.output);
                 setProgress(100);
                 setIsLoading(false);
-                trackSatisfactionEvent('video_ready');
               }, 1500);
               
             } else if (prediction.status === 'failed') {
@@ -220,7 +217,6 @@ export default function FinalizzazioneClient({
               });
             }
           } catch (pollErr: any) {
-             console.error("Polling Error:", pollErr);
              setError(pollErr.message);
              clearInterval(pollInterval);
              clearInterval(msgInterval);
@@ -230,7 +226,6 @@ export default function FinalizzazioneClient({
         }, 3000);
 
       } catch (err: any) {
-        console.error("ERRORE CRITICO:", err);
         setError(err.message);
         setIsLoading(false);
         hasStartedRequest.current = false;
@@ -296,10 +291,11 @@ export default function FinalizzazioneClient({
         throw new Error(result.error || "Errore durante il salvataggio sul server");
       }
 
+      // TRACCIAMENTO: Salvataggio differenziato per il pannello admin
       if (status === 'pubblico') {
-        trackSatisfactionEvent('video_published');
+        await trackSatisfactionEvent('video_published');
       } else {
-        trackSatisfactionEvent('video_saved_private');
+        await trackSatisfactionEvent('video_saved_private');
       }
 
       clearPendingSession();
@@ -331,7 +327,6 @@ export default function FinalizzazioneClient({
     }
   };
 
-  // --- LOGICA WATERMARK CON USERNAME ---
   const getWatermarkedBlob = async (videoUrl: string): Promise<Blob> => {
     return new Promise((resolve, reject) => {
       const video = document.createElement('video');
@@ -362,34 +357,27 @@ export default function FinalizzazioneClient({
             return;
           }
           ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-          
-          // Ombra per rendere il testo leggibile su ogni sfondo
           ctx.shadowColor = "rgba(0,0,0,0.5)";
           ctx.shadowBlur = 10;
-
-          // DISEGNO WATERMARK "DEEP"
           ctx.font = `bold ${canvas.width * 0.05}px sans-serif`;
           ctx.fillStyle = "#FFCC00";
           ctx.textAlign = "right";
           ctx.fillText("DEEP", canvas.width - 25, canvas.height - 55);
-          
-          // DISEGNO @USERNAME
           ctx.font = `bold ${canvas.width * 0.035}px sans-serif`;
           ctx.fillStyle = "rgba(255, 255, 255, 0.9)";
           ctx.fillText(`@${username || 'user'}`, canvas.width - 25, canvas.height - 25);
-          
           requestAnimationFrame(drawFrame);
         };
-
         drawFrame();
       };
-      
       video.onerror = () => reject("Errore caricamento video per watermark");
     });
   };
 
   const handleDownloadVideo = async () => {
+    // TRACCIAMENTO: L'utente clicca su scarica
     trackSatisfactionEvent('video_downloaded');
+    
     const targetUrl = finalVideoUrl || currentVideoUrl;
     if (!targetUrl) return;
 
@@ -409,7 +397,9 @@ export default function FinalizzazioneClient({
   };
 
   const handleShare = async () => {
+    // TRACCIAMENTO: L'utente clicca su condividi
     trackSatisfactionEvent('video_shared');
+    
     const targetUrl = finalVideoUrl || currentVideoUrl;
 
     if (!targetUrl) return;
@@ -626,7 +616,7 @@ export default function FinalizzazioneClient({
                   }} 
                   className="flex items-center justify-center gap-1.5 px-3 py-2 bg-black/40 border border-zinc-700 text-gray-300 text-xs rounded-lg active:scale-95"
                 >
-                  <RotateCcw className="w-3.5 h-3.5" /> Nuovo Take
+                  <RotateCcw className="w-3.5 h-3.5" /> Rprova
                 </button>
               </div>
             </div>
