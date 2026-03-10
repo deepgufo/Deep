@@ -397,38 +397,42 @@ export default function FinalizzazioneClient({
   };
 
   const handleShare = async () => {
-    // TRACCIAMENTO: L'utente clicca su condividi
+    // TRACCIAMENTO: Registra l'azione nel pannello admin
     trackSatisfactionEvent('video_shared');
     
     const targetUrl = finalVideoUrl || currentVideoUrl;
-
     if (!targetUrl) return;
 
     try {
+      // 1. Generiamo il blob del video con watermark
       const blob = await getWatermarkedBlob(targetUrl);
+      // 2. Creiamo un oggetto File per il menu di condivisione
       const file = new File([blob], `deep_film_${category}.mp4`, { type: 'video/mp4' });
 
+      // 3. Verifichiamo se il dispositivo supporta la condivisione di file (iPhone lo fa)
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
         await navigator.share({
           files: [file],
           title: 'Guarda il mio film su Deep!',
-          text: `Ho creato questo film con Cinema Scuola.`,
+          text: `🎬 Entra anche tu nel club: https://deepfly.app`,
         });
       } 
+      // 4. Se la condivisione file fallisce, proviamo solo il link
       else if (navigator.share) {
         await navigator.share({
-          title: 'Guarda il mio film!',
-          url: targetUrl,
-          text: `Ho creato un film "${editedPrompt}" con Cinema Scuola.`,
+          title: 'Guarda il mio film su Deep!',
+          url: 'https://deepfly.app',
+          text: `Ho creato un film "${editedPrompt || initialPrompt}" con Deep.`,
         });
       } 
       else {
         throw new Error("Condivisione non supportata");
       }
     } catch (err) {
+      // Fallback finale: copia il link negli appunti invece di aprire il video
       try {
-        await navigator.clipboard.writeText(targetUrl);
-        alert("Link copiato negli appunti! 📋");
+        await navigator.clipboard.writeText('https://deepfly.app');
+        alert("Link di Deep copiato negli appunti! 📋");
       } catch (copyErr) {
         console.error('Errore condivisione:', err);
       }

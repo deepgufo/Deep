@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { Mail, ArrowRight, CheckCircle2, Loader2 } from 'lucide-react';
 import Link from 'next/link';
@@ -10,6 +10,7 @@ type ViewMode = 'initial' | 'login' | 'signup';
 
 export default function AuthPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   
   const [viewMode, setViewMode] = useState<ViewMode>('initial');
   const [loginEmail, setLoginEmail] = useState('');
@@ -310,6 +311,7 @@ export default function AuthPage() {
                 />
               </div>
 
+              {/* Password field */}
               <div>
                 <label className="block text-sm font-medium text-gray-300 mb-2">Password</label>
                 <input
@@ -341,7 +343,8 @@ export default function AuthPage() {
         )}
 
         {viewMode === 'signup' && (
-          <div className="animate-fadeIn">
+          /* MODIFICA: Aggiunto scroll solo per la vista Registrati */
+          <div className="animate-fadeIn max-h-[80dvh] overflow-y-auto pr-1 custom-scrollbar pb-10">
             <button
               onClick={() => setViewMode('initial')}
               className="text-gray-400 hover:text-white mb-6 flex items-center gap-2"
@@ -482,6 +485,11 @@ export default function AuthPage() {
         @keyframes slideIn { from { transform: translateY(10px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
         .animate-fadeIn { animation: fadeIn 0.5s ease-out; }
         .animate-slideIn { animation: slideIn 0.3s ease-out; }
+        
+        /* MODIFICA: Stile per rendere lo scroll elegante e sottile */
+        .custom-scrollbar::-webkit-scrollbar { width: 3px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(251, 191, 36, 0.2); border-radius: 10px; }
       `}</style>
     </main>
   );
