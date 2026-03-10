@@ -21,6 +21,7 @@ export default function FinalizzazioneClient({
 
   // --- FRENO A MANO ANTI-DUPLICATO ---
   const hasStartedRequest = useRef(false);
+  const hasTrackedReady = useRef(false); // Evita di segnare "video_ready" due volte
 
   const [isLoading, setIsLoading] = useState(true);
   const [progress, setProgress] = useState(0);
@@ -88,7 +89,14 @@ export default function FinalizzazioneClient({
     fetchUsername();
   }, []);
 
-  // --- LOGICA DI PERSISTENZA ---
+  // --- LOGICA DI PERSISTENZA E TRACCIAMENTO VIDEO_READY SICURO ---
+  useEffect(() => {
+    if (finalVideoUrl && !isLoading && !hasTrackedReady.current) {
+      hasTrackedReady.current = true;
+      trackSatisfactionEvent('video_ready');
+    }
+  }, [finalVideoUrl, isLoading]);
+
   useEffect(() => {
     if (propVideoUrl && propVideoUrl !== "undefined" && propVideoUrl !== "") {
       const sessionData = {
@@ -170,6 +178,8 @@ export default function FinalizzazioneClient({
       }
 
       hasStartedRequest.current = true;
+      
+      // TRACCIAMENTO INIZIO GENERAZIONE (Cronometro Start)
       trackSatisfactionEvent('video_start');
 
       try {
@@ -195,8 +205,12 @@ export default function FinalizzazioneClient({
               clearInterval(pollInterval);
               clearInterval(msgInterval);
               
-              // TRACCIAMENTO: Il video è pronto e l'utente lo sta per vedere
-              await trackSatisfactionEvent('video_ready');
+              // TRACCIAMENTO FINE GENERAZIONE (Cronometro Stop)
+              // Lo spariamo subito appena il server dice ok, prima ancora dell'animazione visiva
+              if (!hasTrackedReady.current) {
+                hasTrackedReady.current = true;
+                await trackSatisfactionEvent('video_ready');
+              }
               
               setTimeout(() => {
                 setFinalVideoUrl(prediction.output);
@@ -205,6 +219,8 @@ export default function FinalizzazioneClient({
               }, 1500);
               
             } else if (prediction.status === 'failed') {
+              // Se fallisce, fermiamo il cronometro lo stesso per non sballare le medie con "attese infinite"
+              await trackSatisfactionEvent('video_failed');
               throw new Error(prediction.error || "L'elaborazione cinematografica non è andata a buon fine.");
             } else if (prediction.status === 'starting') {
               setProgress((prev) => (prev < 15 ? prev + 1 : prev));
@@ -248,6 +264,14 @@ export default function FinalizzazioneClient({
 
   const handlePublishAction = async (status: 'pubblico' | 'privato') => {
     if (!finalVideoUrl) return;
+    
+    // TRACCIAMENTO IMMEDIATO: Registriamo l'intenzione prima che il server ci faccia aspettare
+    if (status === 'pubblico') {
+      trackSatisfactionEvent('video_published');
+    } else {
+      trackSatisfactionEvent('video_saved_private');
+    }
+
     setIsPublishing(true);
     setShowPublishMenu(false);
 
@@ -289,13 +313,6 @@ export default function FinalizzazioneClient({
 
       if (!response.ok) {
         throw new Error(result.error || "Errore durante il salvataggio sul server");
-      }
-
-      // TRACCIAMENTO: Salvataggio differenziato per il pannello admin
-      if (status === 'pubblico') {
-        await trackSatisfactionEvent('video_published');
-      } else {
-        await trackSatisfactionEvent('video_saved_private');
       }
 
       clearPendingSession();
@@ -375,7 +392,7 @@ export default function FinalizzazioneClient({
   };
 
   const handleDownloadVideo = async () => {
-    // TRACCIAMENTO: L'utente clicca su scarica
+    // TRACCIAMENTO IMMEDIATO
     trackSatisfactionEvent('video_downloaded');
     
     const targetUrl = finalVideoUrl || currentVideoUrl;
@@ -397,19 +414,16 @@ export default function FinalizzazioneClient({
   };
 
   const handleShare = async () => {
-    // TRACCIAMENTO: Registra l'azione nel pannello admin
+    // TRACCIAMENTO IMMEDIATO
     trackSatisfactionEvent('video_shared');
     
     const targetUrl = finalVideoUrl || currentVideoUrl;
     if (!targetUrl) return;
 
     try {
-      // 1. Generiamo il blob del video con watermark
       const blob = await getWatermarkedBlob(targetUrl);
-      // 2. Creiamo un oggetto File per il menu di condivisione
       const file = new File([blob], `deep_film_${category}.mp4`, { type: 'video/mp4' });
 
-      // 3. Verifichiamo se il dispositivo supporta la condivisione di file (iPhone lo fa)
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
         await navigator.share({
           files: [file],
@@ -417,7 +431,6 @@ export default function FinalizzazioneClient({
           text: `🎬 Entra anche tu nel club: https://deepfly.app`,
         });
       } 
-      // 4. Se la condivisione file fallisce, proviamo solo il link
       else if (navigator.share) {
         await navigator.share({
           title: 'Guarda il mio film su Deep!',
@@ -429,7 +442,6 @@ export default function FinalizzazioneClient({
         throw new Error("Condivisione non supportata");
       }
     } catch (err) {
-      // Fallback finale: copia il link negli appunti invece di aprire il video
       try {
         await navigator.clipboard.writeText('https://deepfly.app');
         alert("Link di Deep copiato negli appunti! 📋");
@@ -473,7 +485,7 @@ export default function FinalizzazioneClient({
 
               <div className="space-y-2 mb-8 px-6">
                 <h2 className="text-white font-bold text-lg leading-tight">{loadingMessage}</h2>
-                <p className="text-gray-500 text-xs font-medium">L'IA sta generando il tuo capolavoro...</p>
+                <p className="text-gray-500 text-xs font-medium">L'IA sta generating il tuo capolavoro...</p>
               </div>
 
               <div className="px-10">

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { Mail, ArrowRight, CheckCircle2, Loader2 } from 'lucide-react';
@@ -20,6 +20,9 @@ export default function AuthPage() {
   const [emailWarning, setEmailWarning] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
+
+  // Freno a mano per evitare doppi tracciamenti al re-render
+  const hasTrackedView = useRef(false);
 
   // --- STATI WAITLIST ---
   const [showWaitlistInput, setShowWaitlistInput] = useState(false);
@@ -64,8 +67,22 @@ export default function AuthPage() {
   };
 
   useEffect(() => {
-    // Traccia l'arrivo dell'utente sulla pagina Auth
-    trackFunnel('view_auth');
+    const initTracking = async () => {
+      if (hasTrackedView.current) return;
+      hasTrackedView.current = true;
+
+      // Risveglio forzato di Supabase per assicurarsi che il client sia pronto
+      try {
+        await supabase.auth.getSession();
+      } catch (e) {
+        console.warn("Riscaldamento Supabase...");
+      }
+
+      // Traccia l'arrivo dell'utente sulla pagina Auth in modo sicuro
+      await trackFunnel('view_auth');
+    };
+
+    initTracking();
   }, []);
   // --- FINE AGGIUNTA FUNNEL TRACKING ---
 

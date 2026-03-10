@@ -165,7 +165,7 @@ export default function UtentiPage() {
 
       setFunnelStats({ auth, start, photo, school });
 
-      // 4. RECUPERO DATI SODDISFAZIONE (Video) - SINCRONIZZATO CON FinalizzazioneClient
+      // 4. RECUPERO DATI SODDISFAZIONE (Video)
       const [ready, shared, downloaded, pubPublic, pubPrivate] = await Promise.all([
         getUniqueCount('video_ready'),
         getUniqueCount('video_shared'),
@@ -182,25 +182,30 @@ export default function UtentiPage() {
         publishedPrivate: pubPrivate
       });
 
-      // --- 5. CALCOLO PERFORMANCE ---
+      // --- 5. CALCOLO PERFORMANCE (SISTEMATO) ---
+      // Prendo solo i dati delle ultime 24 ore per avere medie reali
       const { data: perfData } = await supabase
         .from('funnel_events')
         .select('session_id, step_name, created_at')
         .in('step_name', ['video_start', 'video_ready'])
+        .gte('created_at', twentyFourHoursAgo)
         .order('created_at', { ascending: true });
 
       if (perfData && perfData.length > 0) {
         const sessions: Record<string, { start?: string, end?: string }> = {};
+        
+        // Raggruppa gli eventi per sessione
         perfData.forEach(event => {
           if (!sessions[event.session_id]) sessions[event.session_id] = {};
           if (event.step_name === 'video_start') sessions[event.session_id].start = event.created_at;
           if (event.step_name === 'video_ready') sessions[event.session_id].end = event.created_at;
         });
 
+        // Calcola la durata solo per le sessioni che hanno SIA start CHE end
         const durations = Object.values(sessions)
           .filter(s => s.start && s.end)
           .map(s => (new Date(s.end!).getTime() - new Date(s.start!).getTime()) / 1000)
-          .filter(d => d > 0 && d < 600);
+          .filter(d => d > 3 && d < 600); // Scarta anomalie (<3 secondi o >10 min)
 
         if (durations.length > 0) {
           const avg = durations.reduce((a, b) => a + b, 0) / durations.length;

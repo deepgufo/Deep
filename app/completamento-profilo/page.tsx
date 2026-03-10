@@ -71,6 +71,9 @@ export default function CompletamentoProfiloPage() {
   const [isFaceDetected, setIsFaceDetected] = useState(false);
   const [isFallbackActive, setIsFallbackActive] = useState(false);
 
+  // Stato per evitare spam di eventi "school_selected"
+  const [hasTrackedSchool, setHasTrackedSchool] = useState(false);
+
   const handleAvatarClick = () => {
     fileInputRef.current?.click();
   };
@@ -238,7 +241,7 @@ export default function CompletamentoProfiloPage() {
     if (!nomeArte.trim()) missingFields.push('Nome d\'arte');
     if (!username.trim()) missingFields.push('Username');
     if (!gender) missingFields.push('Ruolo');
-    if (!schoolName) missingFields.push('Scuola'); // VALIDAZIONE SCUOLA
+    if (!schoolName) missingFields.push('Scuola'); 
     
     if (!selectedIaFaceFile) {
       setError('⚠️ È obbligatorio scattare la foto per l\'Identità Digitale IA per procedere.');
@@ -257,15 +260,14 @@ export default function CompletamentoProfiloPage() {
 
     try {
       // 1. RECUPERA SESSIONE UTENTE (Con strategia di recupero per mobile)
-      // Usiamo 'let' perché potremmo dover aggiornare la sessione
       let { data: { session }, error: sessionError } = await supabase.auth.getSession();
       
       // SE FALLISCE O NON C'È USER: Paracadute temporale
       if (sessionError || !session?.user) {
         console.log("Sessione non pronta al primo tentativo, riprovo...");
-        await new Promise(resolve => setTimeout(resolve, 800)); // Aspetta 0.8 secondi
+        await new Promise(resolve => setTimeout(resolve, 800)); 
         const retry = await supabase.auth.getSession();
-        session = retry.data.session; // Aggiorna la sessione con il nuovo tentativo
+        session = retry.data.session; 
         
         if (!session?.user) {
           throw new Error('Devi aver effettuato l\'accesso per salvare il profilo.');
@@ -312,14 +314,14 @@ export default function CompletamentoProfiloPage() {
       const { error: profileError } = await supabase
         .from('profiles')
         .upsert({
-          id: userId, // L'ID DEVE essere quello dell'utente loggato
+          id: userId,
           full_name: nomeArte.trim(),
           avatar_url: avatarUrl,
           ia_face_url: iaFaceUrl,
           username: username.trim().toLowerCase(),
           bio: bio.trim() || null,
           gender: gender,
-          school_name: schoolName, // SALVATAGGIO SCUOLA
+          school_name: schoolName, 
           updated_at: new Date().toISOString()
         }, { onConflict: 'id' });
 
@@ -327,11 +329,6 @@ export default function CompletamentoProfiloPage() {
         console.error("Dettaglio errore database:", profileError);
         throw new Error(`Errore database: ${profileError.message}`);
       }
-
-      // --- TRACCIAMENTO COMPLETAMENTO PROFILO ---
-      // Non serve una funzione dedicata qui, perché questo evento è già tracciato dal fatto 
-      // che l'utente ora appare in `profiles` (che confrontiamo nella dashboard funnel).
-      // ------------------------------------------
 
       setLoadingMessage('✅ Successo! Preparazione set...');
       setTimeout(() => router.push('/profilo'), 1000);
@@ -566,9 +563,11 @@ export default function CompletamentoProfiloPage() {
                 value={schoolName}
                 onChange={(e) => {
                   setSchoolName(e.target.value);
-                  // --- TRACCIAMENTO SCUOLA SELEZIONATA ---
-                  trackFunnel('school_selected');
-                  // ---------------------------------------
+                  // MODIFICA: Invia l'evento solo la prima volta che l'utente seleziona una scuola
+                  if (!hasTrackedSchool) {
+                    trackFunnel('school_selected');
+                    setHasTrackedSchool(true);
+                  }
                 }}
                 disabled={isLoading}
                 className={`w-full px-3 py-2 bg-black/60 border rounded-lg text-white text-[15px] focus:outline-none focus:border-yellow-400/50 transition-all duration-300 appearance-none text-center ${
