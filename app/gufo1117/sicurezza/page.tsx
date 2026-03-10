@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
-import { Zap, AlertTriangle, TerminalSquare, Server, BrainCircuit, Database, Clock, Activity, ShieldAlert, CheckCircle2, Power, AlertOctagon } from 'lucide-react';
+import { Zap, AlertTriangle, TerminalSquare, Server, BrainCircuit, Database, Clock, Activity, ShieldAlert, CheckCircle2, Power, AlertOctagon, Wand2, Cpu } from 'lucide-react';
 
 interface DebugLog {
   id: string;
@@ -85,7 +85,7 @@ export default function SicurezzaPage() {
       if (errorLogs) {
         const recentErrors = errorLogs.filter(l => l.created_at > fifteenMinsAgo);
         
-        const hasAIErrors = recentErrors.some(l => l.context?.includes('API') || l.error_message?.toLowerCase().includes('replicate'));
+        const hasAIErrors = recentErrors.some(l => l.context?.includes('API') || l.error_message?.toLowerCase().includes('replicate') || l.error_message?.toLowerCase().includes('face'));
         if (hasAIErrors) aiStatus = 'error';
 
         const hasStorageErrors = recentErrors.some(l => l.context?.toLowerCase().includes('storage'));
@@ -322,45 +322,79 @@ export default function SicurezzaPage() {
 
           </div>
 
-          {/* COLONNA DESTRA: LA SCATOLA NERA */}
+          {/* COLONNA DESTRA: LA SCATOLA NERA POTENZIATA */}
           <div className="col-span-8 flex flex-col h-[85vh]">
             <div className="bg-zinc-900/40 border border-white/5 rounded-[32px] backdrop-blur-md flex-1 flex flex-col overflow-hidden">
               <div className="p-6 border-b border-white/5 flex items-center justify-between bg-black/20">
                 <h3 className="text-xs font-black uppercase tracking-widest text-zinc-400 flex items-center gap-2">
                   <TerminalSquare size={16} className="text-red-500" /> La Scatola Nera
                 </h3>
-                <span className="text-[9px] font-bold text-zinc-600 uppercase">Ultimi 50 Eventi Critici</span>
+                <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-2">
+                    <div className="w-2 h-2 bg-yellow-500/50 border border-yellow-400 rounded-full"></div>
+                    <span className="text-[8px] font-black text-zinc-500 uppercase">Face-Swap Alert</span>
+                  </div>
+                  <span className="text-[9px] font-bold text-zinc-600 uppercase">Ultimi 50 Eventi Critici</span>
+                </div>
               </div>
               
-              <div className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-3">
+              <div className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-4">
                 {logs.length === 0 ? (
                   <div className="h-full flex flex-col items-center justify-center text-zinc-600 opacity-50">
                     <CheckCircle2 size={48} className="mb-4" />
                     <p className="text-xs font-bold uppercase tracking-widest">Nessun Errore Registrato</p>
                   </div>
                 ) : (
-                  logs.map((log) => (
-                    <div key={log.id} className="bg-black/60 border border-red-500/10 p-4 rounded-2xl hover:border-red-500/30 transition-colors">
-                      <div className="flex justify-between items-start mb-2">
-                        <span className="text-[10px] font-black text-red-400 uppercase tracking-wider bg-red-500/10 px-2 py-1 rounded">
-                          {log.context}
-                        </span>
-                        <span className="text-[10px] text-zinc-500 font-medium">
-                          {new Date(log.created_at).toLocaleString('it-IT', { 
-                            day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' 
-                          })}
-                        </span>
+                  logs.map((log) => {
+                    const isFaceSwapError = log.error_message?.toLowerCase().includes('face') || log.error_message?.toLowerCase().includes('swap') || log.context?.toLowerCase().includes('swap');
+                    const isIAError = log.context?.includes('API') || log.error_message?.toLowerCase().includes('replicate');
+
+                    return (
+                      <div 
+                        key={log.id} 
+                        className={`bg-black/60 border p-5 rounded-2xl hover:bg-black/80 transition-all duration-300 ${
+                          isFaceSwapError 
+                            ? 'border-yellow-500/30 shadow-[0_0_20px_rgba(234,179,8,0.05)]' 
+                            : 'border-red-500/10'
+                        }`}
+                      >
+                        <div className="flex justify-between items-start mb-3">
+                          <div className="flex items-center gap-2">
+                            <span className={`text-[10px] font-black uppercase tracking-widest px-2 py-1 rounded flex items-center gap-1.5 ${
+                              isFaceSwapError ? 'bg-yellow-500/20 text-yellow-500' : 'bg-red-500/10 text-red-400'
+                            }`}>
+                              {isFaceSwapError ? <Wand2 size={12} /> : isIAError ? <Cpu size={12} /> : <AlertTriangle size={12} />}
+                              {log.context}
+                            </span>
+                            {isFaceSwapError && (
+                              <span className="text-[8px] font-black text-yellow-500/50 uppercase tracking-tighter italic">Rendering Issue Detected</span>
+                            )}
+                          </div>
+                          <span className="text-[10px] font-mono text-zinc-600">
+                            {new Date(log.created_at).toLocaleString('it-IT', { 
+                              day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' 
+                            })}
+                          </span>
+                        </div>
+                        
+                        <div className="bg-zinc-950/50 p-3 rounded-lg border border-white/5 mb-3">
+                          <p className="text-sm font-mono text-zinc-300 leading-relaxed break-words">
+                            <span className="text-red-500 mr-2"> {'>'} </span>
+                            {log.error_message}
+                          </p>
+                        </div>
+
+                        {log.device_info && (
+                          <div className="flex items-center gap-2 opacity-40 group-hover:opacity-100 transition-opacity">
+                            <Activity size={10} className="text-zinc-500" />
+                            <p className="text-[8px] text-zinc-500 font-mono uppercase tracking-tight">
+                              Device_ID: {log.device_info.substring(0, 80)}...
+                            </p>
+                          </div>
+                        )}
                       </div>
-                      <p className="text-sm font-mono text-zinc-300 leading-relaxed break-words">
-                        {log.error_message}
-                      </p>
-                      {log.device_info && (
-                        <p className="text-[8px] text-zinc-600 font-mono mt-3 uppercase border-t border-white/5 pt-2">
-                          Client: {log.device_info}
-                        </p>
-                      )}
-                    </div>
-                  ))
+                    );
+                  })
                 )}
               </div>
             </div>
