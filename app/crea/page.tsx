@@ -367,43 +367,46 @@ export default function CreaPage() {
               </div>
             </div>
 
-            {isCoupleMode && (
-              <div className="animate-fadeIn">
-                <input
-                  type="text"
-                  value={coupleName}
-                  onChange={(e) => setCoupleName(e.target.value)}
-                  placeholder="Nome del tuo complice..."
-                  className="w-full bg-[#1F2937]/40 border border-zinc-800 rounded-[18px] px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:border-[#FFCC00]/50 transition-all text-[14px]"
-                />
-              </div>
-            )}
+            {/* Il campo coupleName viene rimosso visivamente per far spazio al messaggio "in arrivo" */}
+            {isCoupleMode && null}
           </div>
 
           <div className="flex-1 flex flex-col justify-center animate-fadeIn delay-300 mt-4 mb-4">
-            <p className="text-[11px] font-bold text-zinc-500 uppercase tracking-widest mb-2 pl-1">POV di esempio:</p>
-            <div className="grid grid-cols-2 gap-3 h-full max-h-[190px]">
-              {currentSuggestions.slice(0, 3).map((suggestion, index) => (
-                <button
-                  key={`${isCoupleMode ? 'couple' : 'single'}-${suggestion.id}`}
-                  onClick={() => handlePillClick(suggestion.text, suggestion.id)}
-                  className={`group relative flex flex-col justify-center items-center p-3 bg-[#1F2937]/40 backdrop-blur-md rounded-[24px] border border-transparent transition-all duration-300 overflow-hidden text-center hover:shadow-[0_0_15px_rgba(255,204,0,0.4)] hover:border-[#FFCC00]/50 ${
-                    index === 2 ? 'col-span-2' : 'col-span-1'
-                  } ${
-                    selectedId === suggestion.id 
-                    ? 'shadow-[0_0_15px_rgba(255,204,0,0.6)] border-[#FFCC00] bg-[#1F2937]/70' 
-                    : ''
-                  }`}
-                >
-                  <span className="absolute top-2 right-3 text-[18px] drop-shadow-lg group-hover:scale-110 transition-transform opacity-50 group-hover:opacity-100">
-                    {suggestion.emoji}
-                  </span>
-                  <p className={`text-[11px] font-medium leading-[1.4] w-full px-2 mt-3 line-clamp-3 ${selectedId === suggestion.id ? 'text-[#FFCC00]' : 'text-gray-300'}`}>
-                    {suggestion.text.replace('POV:', '').trim()}
-                  </p>
-                </button>
-              ))}
-            </div>
+            {!isCoupleMode ? (
+              <>
+                <p className="text-[11px] font-bold text-zinc-500 uppercase tracking-widest mb-2 pl-1">POV di esempio:</p>
+                <div className="grid grid-cols-2 gap-3 h-full max-h-[190px]">
+                  {currentSuggestions.slice(0, 3).map((suggestion, index) => (
+                    <button
+                      key={`${isCoupleMode ? 'couple' : 'single'}-${suggestion.id}`}
+                      onClick={() => handlePillClick(suggestion.text, suggestion.id)}
+                      className={`group relative flex flex-col justify-center items-center p-3 bg-[#1F2937]/40 backdrop-blur-md rounded-[24px] border border-transparent transition-all duration-300 overflow-hidden text-center hover:shadow-[0_0_15px_rgba(255,204,0,0.4)] hover:border-[#FFCC00]/50 ${
+                        index === 2 ? 'col-span-2' : 'col-span-1'
+                      } ${
+                        selectedId === suggestion.id 
+                        ? 'shadow-[0_0_15px_rgba(255,204,0,0.6)] border-[#FFCC00] bg-[#1F2937]/70' 
+                        : ''
+                      }`}
+                    >
+                      <span className="absolute top-2 right-3 text-[18px] drop-shadow-lg group-hover:scale-110 transition-transform opacity-50 group-hover:opacity-100">
+                        {suggestion.emoji}
+                      </span>
+                      <p className={`text-[11px] font-medium leading-[1.4] w-full px-2 mt-3 line-clamp-3 ${selectedId === suggestion.id ? 'text-[#FFCC00]' : 'text-gray-300'}`}>
+                        {suggestion.text.replace('POV:', '').trim()}
+                      </p>
+                    </button>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <div className="flex flex-col items-center justify-center py-10 px-6 bg-[#1F2937]/20 border border-yellow-400/10 rounded-[32px] backdrop-blur-md text-center">
+                <span className="text-4xl mb-4 animate-bounce">🔥</span>
+                <h2 className="text-white font-black text-xl uppercase tracking-tighter leading-tight">
+                  funzione in arrivo..<br/>
+                  <span className="text-[#FFCC00] text-sm tracking-widest font-bold">rimanete connessi!!</span>
+                </h2>
+              </div>
+            )}
           </div>
 
           <div className="flex-shrink-0 flex flex-col items-center pb-8 pt-0 relative z-20 gap-3">
@@ -439,10 +442,10 @@ export default function CreaPage() {
 
             <button
               onClick={handleGenerateFilm}
-              disabled={isGenerating}
+              disabled={isGenerating || isCoupleMode}
               className={`w-[85%] relative inline-flex items-center justify-center h-[48px] bg-[#FFCC00] text-[#000000] font-extrabold text-[13px] tracking-widest rounded-[18px] transition-all duration-300 disabled:cursor-not-allowed ${
-                isGenerating 
-                  ? 'opacity-70 cursor-wait' 
+                isGenerating || isCoupleMode
+                  ? 'opacity-40 cursor-not-allowed' 
                   : (isPromptReady || dailyCount >= 3)
                     ? 'opacity-100 shadow-[0_0_20px_rgba(255,204,0,0.5)] animate-pulse-glow hover:scale-[1.02] active:scale-[0.98]' 
                     : 'opacity-40'
@@ -461,9 +464,9 @@ export default function CreaPage() {
                       <User className="w-4 h-4 mr-2 relative z-10" />
                   )}
                   <span className="relative z-10 font-sans tracking-wide">
-                      {dailyCount >= 3 ? 'SBLOCCA VIDEO' : selectedChar ? 'GENERA FILM' : 'SCEGLI PERSONAGGIO'}
+                      {isCoupleMode ? 'NON DISPONIBILE' : dailyCount >= 3 ? 'SBLOCCA VIDEO' : selectedChar ? 'GENERA FILM' : 'SCEGLI PERSONAGGIO'}
                   </span>
-                  {(isPromptReady && dailyCount < 3) && <Sparkles className="w-4 h-4 ml-2 relative z-10" />}
+                  {(isPromptReady && dailyCount < 3 && !isCoupleMode) && <Sparkles className="w-4 h-4 ml-2 relative z-10" />}
                 </>
               )}
             </button>

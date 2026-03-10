@@ -152,6 +152,17 @@ export default function SceltaPersonaggio() {
             </div>
           )}
         </div>
+
+        {/* C. MESSAGGIO FLUTTUANTE (Sopra la NavTab) */}
+        <div className="absolute bottom-24 left-1/2 -translate-x-1/2 z-[60] w-max animate-bounce">
+          <div className="bg-black/60 backdrop-blur-lg border border-yellow-500/60 px-4 py-2 rounded-full shadow-[0_0_20px_rgba(234,179,8,0.2)] flex items-center gap-2">
+            <div className="w-1.5 h-1.5 bg-yellow-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(234,179,8,1)]"></div>
+            <span className="text-[10px] font-black text-white uppercase tracking-[0.15em] whitespace-nowrap">
+              nuovi personaggi in arrivo !!
+            </span>
+          </div>
+        </div>
+
       </div>
     </div>
   );
