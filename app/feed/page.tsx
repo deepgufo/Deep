@@ -6,14 +6,15 @@ import { supabase } from '@/lib/supabase';
 import { 
   MoreVertical, 
   MessageCircle, 
-  Share2, 
+  Send, 
   Download,
   AlertCircle,
   Loader2,
   Flag,
   Play,
   X,
-  CheckCircle2
+  CheckCircle2,
+  Trophy
 } from 'lucide-react';
 import Image from 'next/image';
 import PWAInstallPrompt from '../components/PWAInstallPrompt';
@@ -381,19 +382,38 @@ export default function FeedPage() {
     }
   };
 
-  // --- CONDIVIDI VIDEO ---
+  // --- CONDIVIDI VIDEO (SISTEMATO PER MOBILE NATIVO) ---
   const handleShare = async (post: Post) => {
+    const shareUrl = 'https://deepfly.app/feed'; // Il link porta all'app
+    const authorName = post.profile?.username || 'un tuo compagno';
+    
     if (navigator.share) {
       try {
         await navigator.share({
-          title: `Film di ${post.profile?.full_name || 'Cinema Scuola'}`,
-          text: post.prompt,
-          url: post.video_url
+          title: `Guarda questo film su Deep`,
+          text: `🎬 Guarda il film generato dall'IA da @${authorName}: "${post.prompt}".\nEntra anche tu in Deep!`,
+          url: shareUrl
         });
-      } catch (err) {}
+      } catch (err: any) {
+        // Se l'utente annulla la condivisione, il browser lancia un AbortError. Non facciamo nulla.
+        if (err.name !== 'AbortError') {
+          console.error("Errore condivisione nativa:", err);
+          fallbackShare(shareUrl);
+        }
+      }
     } else {
-      await navigator.clipboard.writeText(post.video_url);
-      alert('Link copiato negli appunti!');
+      // Fallback per PC o browser non compatibili
+      fallbackShare(shareUrl);
+    }
+  };
+
+  const fallbackShare = async (url: string) => {
+    try {
+      await navigator.clipboard.writeText(url);
+      setFeedbackMessage({ type: 'success', text: 'Link copiato negli appunti!' });
+      setTimeout(() => setFeedbackMessage(null), 3000);
+    } catch (err) {
+      console.error("Errore clipboard:", err);
     }
   };
 
@@ -601,7 +621,7 @@ export default function FeedPage() {
                     </div>
                   )}
 
-                  <div className="absolute bottom-10 right-4 flex flex-col items-center gap-4 z-40">
+                  <div className="absolute bottom-10 right-4 flex flex-col items-center gap-6 z-40">
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
@@ -613,16 +633,17 @@ export default function FeedPage() {
                         post.has_user_liked ? 'scale-110' : 'scale-100'
                       }`}>
                         {post.has_user_liked ? (
-                          <div className="text-3xl drop-shadow-[0_0_10px_rgba(212,175,55,0.8)]">🏆</div>
+                          <Trophy className="w-7 h-7 text-[#D4AF37] fill-[#D4AF37] drop-shadow-[0_0_15px_rgba(212,175,55,0.6)]" />
                         ) : (
-                          <span className="text-2xl drop-shadow-[0_2px_8px_rgba(0,0,0,0.9)] group-hover:scale-110 transition-transform">🏆</span>
+                          <Trophy className="w-7 h-7 text-white drop-shadow-[0_2px_8px_rgba(0,0,0,0.9)] group-hover:scale-110 transition-transform" />
                         )}
                       </div>
-                      <span className={`text-xs font-bold drop-shadow-[0_2px_8px_rgba(0,0,0,0.9)] ${
+                      <span className={`text-[10px] font-bold drop-shadow-[0_2px_8px_rgba(0,0,0,0.9)] ${
                         post.has_user_liked ? 'text-[#D4AF37]' : 'text-white'
                       }`}>
                         {post.likes_count}
                       </span>
+                      <span className="text-[9px] text-white/80 font-semibold drop-shadow-md -mt-1">Oscar</span>
                     </button>
 
                     <button
@@ -630,9 +651,10 @@ export default function FeedPage() {
                         e.stopPropagation();
                         handleShare(post);
                       }}
-                      className="group"
+                      className="flex flex-col items-center gap-1 group"
                     >
-                      <Share2 className="w-6 h-6 text-white drop-shadow-[0_2px_8px_rgba(0,0,0,0.9)] group-hover:scale-110 transition-transform" />
+                      <Send className="w-7 h-7 text-white drop-shadow-[0_2px_8px_rgba(0,0,0,0.9)] group-hover:scale-110 transition-transform -rotate-45 mb-1" />
+                      <span className="text-[9px] text-white/80 font-semibold drop-shadow-md">Condividi</span>
                     </button>
                   </div>
                 </div>
