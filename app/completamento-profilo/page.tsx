@@ -2,17 +2,14 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Camera, User, Film, ShieldAlert, School } from 'lucide-react';
-import { supabase, supabaseAdmin } from '@/lib/supabase';
-import { validateFaceImage } from '@/utils/faceValidation';
+import { Camera, User, School } from 'lucide-react';
+import { supabase } from '@/lib/supabase';
 
 type Gender = 'attore' | 'attrice' | '';
 
 export default function CompletamentoProfiloPage() {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const iaFaceInputRef = useRef<HTMLInputElement>(null);
-  const nomeArteRef = useRef<HTMLInputElement>(null);
   const genderRef = useRef<HTMLDivElement>(null);
   
   // --- FUNZIONE DI TRACCIAMENTO FUNNEL ---
@@ -55,77 +52,19 @@ export default function CompletamentoProfiloPage() {
 
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [iaFacePreview, setIaFacePreview] = useState<string | null>(null);
-  const [selectedIaFaceFile, setSelectedIaFaceFile] = useState<File | null>(null);
-  const [nomeArte, setNomeArte] = useState('');
   const [username, setUsername] = useState('');
   const [gender, setGender] = useState<Gender>('');
-  const [schoolName, setSchoolName] = useState(''); // NUOVO STATO SCUOLA
-  const [bio, setBio] = useState('');
+  const [schoolName, setSchoolName] = useState(''); 
   const [isLoading, setIsLoading] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState('');
   const [error, setError] = useState('');
   const [shakeFields, setShakeFields] = useState(false);
-
-  // Stati per il feedback della validazione facciale
-  const [isFaceDetected, setIsFaceDetected] = useState(false);
-  const [isFallbackActive, setIsFallbackActive] = useState(false);
 
   // Stato per evitare spam di eventi "school_selected"
   const [hasTrackedSchool, setHasTrackedSchool] = useState(false);
 
   const handleAvatarClick = () => {
     fileInputRef.current?.click();
-  };
-
-  const handleIaFaceClick = () => {
-    iaFaceInputRef.current?.click();
-  };
-
-  const calculateBrightness = (imageFile: File): Promise<{ brightness: number, img: HTMLImageElement, canvas: HTMLCanvasElement }> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      
-      reader.onload = (e) => {
-        const img = new Image();
-        img.onload = () => {
-          const canvas = document.createElement('canvas');
-          const ctx = canvas.getContext('2d');
-          
-          if (!ctx) {
-            reject(new Error('Canvas context non disponibile'));
-            return;
-          }
-          
-          const scale = Math.min(400 / img.width, 400 / img.height);
-          canvas.width = img.width * scale;
-          canvas.height = img.height * scale;
-          
-          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-          
-          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-          const data = imageData.data;
-          
-          let totalBrightness = 0;
-          for (let i = 0; i < data.length; i += 4) {
-            const r = data[i];
-            const g = data[i + 1];
-            const b = data[i + 2];
-            const brightness = 0.299 * r + 0.587 * g + 0.114 * b;
-            totalBrightness += brightness;
-          }
-          
-          const averageBrightness = totalBrightness / (data.length / 4);
-          resolve({ brightness: averageBrightness, img, canvas });
-        };
-        
-        img.onerror = () => reject(new Error('Errore caricamento immagine'));
-        img.src = e.target?.result as string;
-      };
-      
-      reader.onerror = () => reject(new Error('Errore lettura file'));
-      reader.readAsDataURL(imageFile);
-    });
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -147,84 +86,10 @@ export default function CompletamentoProfiloPage() {
       const reader = new FileReader();
       reader.onloadend = () => {
         setAvatarPreview(reader.result as string);
+        // Tracciamo l'aggiunta della foto profilo per mantenere attivo il funnel
+        trackFunnel('photo_added');
       };
       reader.readAsDataURL(file);
-    }
-  };
-
-  const handleIaFaceChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      if (!file.type.startsWith('image/')) {
-        setError('Seleziona un file immagine');
-        return;
-      }
-      
-      if (file.size > 5 * 1024 * 1024) {
-        setError('L\'immagine deve essere inferiore a 5MB');
-        return;
-      }
-
-      try {
-        setIsLoading(true);
-        setLoadingMessage('Analisi biometrica...');
-        setIsFaceDetected(false);
-        setIsFallbackActive(false);
-
-        const { brightness, img, canvas } = await calculateBrightness(file);
-        
-        if (brightness < 45) {
-          setError('⚠️ Foto troppo scura! Spostati in un punto più illuminato.');
-          setIaFacePreview(null);
-          setSelectedIaFaceFile(null);
-          setIsLoading(false);
-          return; 
-        }
-
-        const validationPromise = validateFaceImage(img, canvas);
-        const timeoutPromise = new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('TIMEOUT')), 5000)
-        );
-
-        try {
-          const validation = await Promise.race([validationPromise, timeoutPromise]) as { valid: boolean; error?: string };
-          
-          if (!validation.valid) {
-            setError(`⚠️ ${validation.error}`);
-            setIaFacePreview(null);
-            setSelectedIaFaceFile(null);
-            setIsLoading(false);
-            return;
-          }
-          setIsFaceDetected(true);
-        } catch (err: any) {
-          if (err.message === 'TIMEOUT') {
-            setIsFallbackActive(true);
-            setIsFaceDetected(true);
-          } else {
-            throw err;
-          }
-        }
-        
-        setSelectedIaFaceFile(file);
-        setError('');
-        
-        const reader = new FileReader();
-        reader.onloadend = () => {
-          setIaFacePreview(reader.result as string);
-        };
-        reader.readAsDataURL(file);
-        setIsLoading(false);
-
-        // --- TRACCIAMENTO FOTO IA INSERITA CON SUCCESSO ---
-        trackFunnel('photo_added');
-        // ---------------------------------------------------
-        
-      } catch (err) {
-        console.error('Errore validazione:', err);
-        setError('Errore durante l\'analisi. Riprova.');
-        setIsLoading(false);
-      }
     }
   };
 
@@ -238,16 +103,9 @@ export default function CompletamentoProfiloPage() {
     setError('');
 
     const missingFields: string[] = [];
-    if (!nomeArte.trim()) missingFields.push('Nome d\'arte');
     if (!username.trim()) missingFields.push('Username');
     if (!gender) missingFields.push('Ruolo');
     if (!schoolName) missingFields.push('Scuola'); 
-    
-    if (!selectedIaFaceFile) {
-      setError('⚠️ È obbligatorio scattare la foto per l\'Identità Digitale IA per procedere.');
-      triggerShake();
-      return; 
-    }
 
     if (missingFields.length > 0) {
       setError(`Campi mancanti: ${missingFields.join(', ')}`);
@@ -276,7 +134,6 @@ export default function CompletamentoProfiloPage() {
 
       const userId = session.user.id;
       let avatarUrl: string | null = null;
-      let iaFaceUrl: string | null = null;
 
       // 2. CARICAMENTO AVATAR (Se selezionato)
       if (selectedFile) {
@@ -294,32 +151,15 @@ export default function CompletamentoProfiloPage() {
         avatarUrl = urlData.publicUrl;
       }
 
-      // 3. CARICAMENTO FOTO IA (Obbligatoria)
-      setLoadingMessage('Sincronizzazione Identità IA...');
-      const iaExt = selectedIaFaceFile.name.split('.').pop();
-      const iaFileName = `${userId}/ia-face-${Date.now()}.${iaExt}`;
-      
-      const { error: iaUploadError } = await supabase.storage
-        .from('ia-faces')
-        .upload(iaFileName, selectedIaFaceFile, { cacheControl: '3600', upsert: true });
-
-      if (iaUploadError) throw new Error(`Errore caricamento foto IA: ${iaUploadError.message}`);
-      
-      const { data: iaUrlData } = supabase.storage.from('ia-faces').getPublicUrl(iaFileName);
-      iaFaceUrl = iaUrlData.publicUrl;
-
-      // 4. SALVATAGGIO PROFILO (UPSERT)
+      // 3. SALVATAGGIO PROFILO (UPSERT)
       setLoadingMessage('Salvataggio profilo...');
       
       const { error: profileError } = await supabase
         .from('profiles')
         .upsert({
           id: userId,
-          full_name: nomeArte.trim(),
           avatar_url: avatarUrl,
-          ia_face_url: iaFaceUrl,
           username: username.trim().toLowerCase(),
-          bio: bio.trim() || null,
           gender: gender,
           school_name: schoolName, 
           updated_at: new Date().toISOString()
@@ -329,6 +169,11 @@ export default function CompletamentoProfiloPage() {
         console.error("Dettaglio errore database:", profileError);
         throw new Error(`Errore database: ${profileError.message}`);
       }
+
+      // --- TRACCIAMENTO COMPLETAMENTO PROFILO ---
+      // Invia l'evento SOLO quando l'utente ha effettivamente completato tutto il funnel
+      await trackFunnel('school_selected');
+      // ------------------------------------------
 
       setLoadingMessage('✅ Successo! Preparazione set...');
       setTimeout(() => router.push('/profilo'), 1000);
@@ -341,7 +186,7 @@ export default function CompletamentoProfiloPage() {
   };
 
   return (
-    <main className="h-[100dvh] bg-black relative overflow-hidden">
+    <main className="h-[100dvh] bg-black relative overflow-hidden flex flex-col">
       <div className="absolute inset-0 bg-black pointer-events-none">
         <div 
           className="absolute inset-0 opacity-80"
@@ -358,76 +203,55 @@ export default function CompletamentoProfiloPage() {
         ></div>
       </div>
 
-      <div className="relative z-10 h-[calc(100dvh-4px)] flex flex-col px-4 py-2">
-        <div className="text-center mb-1.5">
-          <h1 className="text-lg font-bold text-white mb-0.5 tracking-tight">
-            Crea la tua identità da Star
+      <div className="relative z-10 flex-1 flex flex-col px-6 py-6 overflow-y-auto">
+        <div className="text-center mb-8 mt-4">
+          <h1 className="text-2xl font-bold text-white mb-1 tracking-tight">
+            Il tuo Profilo
           </h1>
-          <p className="text-[10px] text-gray-300">
-            L&apos;IA ha bisogno di un tuo primo piano
+          <p className="text-sm text-gray-400">
+            Come ti conoscerà la tua scuola?
           </p>
         </div>
 
-        <form onSubmit={handleSaveProfile} className="flex-1 flex flex-col items-center justify-between max-w-[400px] mx-auto w-full overflow-y-auto">
-          <div className="w-full space-y-1.5">
-            <div className="w-full flex justify-center mb-1.5">
-              <button
-                type="button"
-                onClick={handleAvatarClick}
-                className="relative w-16 h-16 rounded-full bg-white/5 border-2 border-yellow-400/30 hover:border-yellow-400/50 transition-all duration-300 flex items-center justify-center group overflow-hidden"
-              >
-                {avatarPreview ? (
-                  <img 
-                    src={avatarPreview} 
-                    alt="Avatar preview" 
-                    className="w-full h-full object-cover rounded-full"
-                  />
-                ) : (
-                  <div className="flex flex-col items-center justify-center">
-                    <Camera className="w-5 h-5 text-yellow-400/70 group-hover:text-yellow-400 transition-colors duration-300" />
-                    <span className="text-[8px] text-yellow-400/70 mt-0.5 group-hover:text-yellow-400 transition-colors duration-300">
-                      Profilo
-                    </span>
-                  </div>
-                )}
-                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity duration-300 rounded-full flex items-center justify-center">
-                  <Camera className="w-4 h-4 text-white" />
+        <form onSubmit={handleSaveProfile} className="flex flex-col items-center justify-center max-w-[400px] mx-auto w-full space-y-8 flex-1">
+          
+          <div className="w-full flex justify-center mb-4">
+            <button
+              type="button"
+              onClick={handleAvatarClick}
+              className="relative w-28 h-28 rounded-full bg-white/5 border-2 border-yellow-400/30 hover:border-yellow-400/60 transition-all duration-300 flex items-center justify-center group overflow-hidden shadow-[0_0_20px_rgba(251,191,36,0.15)]"
+            >
+              {avatarPreview ? (
+                <img 
+                  src={avatarPreview} 
+                  alt="Avatar preview" 
+                  className="w-full h-full object-cover rounded-full"
+                />
+              ) : (
+                <div className="flex flex-col items-center justify-center">
+                  <Camera className="w-8 h-8 text-yellow-400/70 group-hover:text-yellow-400 transition-colors duration-300 mb-1" />
+                  <span className="text-[10px] font-medium text-yellow-400/70 group-hover:text-yellow-400 transition-colors duration-300 uppercase tracking-wider">
+                    Foto
+                  </span>
                 </div>
-              </button>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*"
-                onChange={handleFileChange}
-                className="hidden"
-              />
-            </div>
+              )}
+              <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity duration-300 rounded-full flex items-center justify-center">
+                <Camera className="w-6 h-6 text-white" />
+              </div>
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              onChange={handleFileChange}
+              className="hidden"
+            />
+          </div>
 
+          <div className="w-full space-y-4">
             <div className="w-full">
-              <label htmlFor="nome-arte" className="block text-[11px] font-medium text-gray-300 mb-0.5 text-center flex items-center justify-center gap-1">
-                <User className="w-3 h-3 text-yellow-400" />
-                Nome d&apos;arte
-              </label>
-              <input
-                ref={nomeArteRef}
-                id="nome-arte"
-                type="text"
-                value={nomeArte}
-                onChange={(e) => setNomeArte(e.target.value)}
-                className={`w-full px-3 py-1.5 bg-white/5 border rounded-lg text-white placeholder-gray-500 text-center text-[16px] focus:outline-none focus:border-yellow-400/50 focus:ring-1 focus:ring-yellow-400/20 transition-all duration-300 ${
-                  shakeFields && !nomeArte.trim() 
-                    ? 'border-red-500/50 animate-shake' 
-                    : 'border-white/10'
-                }`}
-                placeholder="Nome da star"
-                disabled={isLoading}
-                maxLength={50}
-              />
-            </div>
-
-            <div className="w-full">
-              <label htmlFor="username" className="block text-[11px] font-medium text-gray-300 mb-0.5 text-center flex items-center justify-center gap-1">
-                <User className="w-3 h-3 text-yellow-400" />
+              <label htmlFor="username" className="block text-xs font-bold uppercase tracking-widest text-gray-400 mb-2 text-center flex items-center justify-center gap-1.5">
+                <User className="w-4 h-4 text-yellow-400" />
                 Username
               </label>
               <input
@@ -435,34 +259,34 @@ export default function CompletamentoProfiloPage() {
                 type="text"
                 value={username}
                 onChange={(e) => setUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ''))}
-                className={`w-full px-3 py-1.5 bg-white/5 border rounded-lg text-white placeholder-gray-500 text-center text-[16px] focus:outline-none focus:border-yellow-400/50 focus:ring-1 focus:ring-yellow-400/20 transition-all duration-300 ${
+                className={`w-full px-5 py-4 bg-white/5 border rounded-2xl text-white placeholder-gray-600 text-center text-lg focus:outline-none focus:border-yellow-400/50 focus:ring-2 focus:ring-yellow-400/20 transition-all duration-300 ${
                   shakeFields && !username.trim() 
                     ? 'border-red-500/50 animate-shake' 
-                    : 'border-white/10'
+                    : 'border-white/10 hover:border-white/20'
                 }`}
-                placeholder="nomeutente123"
+                placeholder="Scegli il tuo @username"
                 disabled={isLoading}
                 maxLength={30}
               />
             </div>
 
             <div className="w-full">
-              <label className="block text-[11px] font-medium text-gray-300 mb-0.5 text-center">
-                Ruolo 🎬
+              <label className="block text-xs font-bold uppercase tracking-widest text-gray-400 mb-2 text-center">
+                Sei un attore o un'attrice?
               </label>
               <div 
                 ref={genderRef}
-                className={`grid grid-cols-2 gap-1.5 ${
+                className={`grid grid-cols-2 gap-3 ${
                   shakeFields && !gender ? 'animate-shake' : ''
                 }`}
               >
                 <button
                   type="button"
                   onClick={() => setGender('attore')}
-                  className={`px-3 py-1.5 rounded-lg border-2 transition-all duration-300 font-semibold text-xs ${
+                  className={`px-4 py-4 rounded-2xl border-2 transition-all duration-300 font-extrabold text-sm tracking-wide ${
                     gender === 'attore'
-                      ? 'bg-yellow-400/20 border-yellow-400 text-yellow-400 shadow-[0_0_15px_rgba(251,191,36,0.3)]'
-                      : 'bg-white/5 border-white/10 text-gray-300 hover:border-yellow-400/30 hover:text-yellow-400/70'
+                      ? 'bg-yellow-400/20 border-yellow-400 text-yellow-400 shadow-[0_0_20px_rgba(251,191,36,0.3)] scale-[1.02]'
+                      : 'bg-white/5 border-white/10 text-gray-400 hover:border-yellow-400/30 hover:text-yellow-400/70 hover:bg-white/10'
                   }`}
                   disabled={isLoading}
                 >
@@ -471,10 +295,10 @@ export default function CompletamentoProfiloPage() {
                 <button
                   type="button"
                   onClick={() => setGender('attrice')}
-                  className={`px-3 py-1.5 rounded-lg border-2 transition-all duration-300 font-semibold text-xs ${
+                  className={`px-4 py-4 rounded-2xl border-2 transition-all duration-300 font-extrabold text-sm tracking-wide ${
                     gender === 'attrice'
-                      ? 'bg-yellow-400/20 border-yellow-400 text-yellow-400 shadow-[0_0_15px_rgba(251,191,36,0.3)]'
-                      : 'bg-white/5 border-white/10 text-gray-300 hover:border-yellow-400/30 hover:text-yellow-400/70'
+                      ? 'bg-yellow-400/20 border-yellow-400 text-yellow-400 shadow-[0_0_20px_rgba(251,191,36,0.3)] scale-[1.02]'
+                      : 'bg-white/5 border-white/10 text-gray-400 hover:border-yellow-400/30 hover:text-yellow-400/70 hover:bg-white/10'
                   }`}
                   disabled={isLoading}
                 >
@@ -484,111 +308,40 @@ export default function CompletamentoProfiloPage() {
             </div>
 
             <div className="w-full">
-              <label htmlFor="bio" className="block text-[11px] font-medium text-gray-300 mb-0.5 text-center">
-                Bio (opzionale)
-              </label>
-              <textarea
-                id="bio"
-                value={bio}
-                onChange={(e) => setBio(e.target.value)}
-                className="w-full px-3 py-1.5 bg-white/5 border border-white/10 rounded-lg text-white placeholder-gray-500 text-center text-[13px] focus:outline-none focus:border-yellow-400/50 focus:ring-1 focus:ring-yellow-400/20 transition-all duration-300 resize-none"
-                placeholder="Descrizione breve..."
-                rows={2}
-                disabled={isLoading}
-                maxLength={200}
-              />
-            </div>
-
-            <div className="w-full pt-2 border-t border-white/10">
-              <label className="block text-[11px] font-medium text-gray-300 mb-1 text-center font-bold">
-                Identità Digitale 🎬
-              </label>
-              <div className="w-full flex flex-col items-center">
-                <div className="relative mb-1">
-                  <div className={`absolute -inset-2 border-2 rounded-xl pointer-events-none transition-all duration-500 ${
-                    isFaceDetected 
-                      ? 'border-green-500 shadow-[0_0_15px_rgba(34,197,94,0.4)]' 
-                      : 'border-purple-400/30'
-                  } ${shakeFields && !selectedIaFaceFile ? 'animate-shake border-red-500' : ''}`} />
-                  
-                  <button
-                    type="button"
-                    onClick={handleIaFaceClick}
-                    className="relative w-16 h-20 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center group overflow-hidden"
-                  >
-                    {iaFacePreview ? (
-                      <img 
-                        src={iaFacePreview} 
-                        alt="IA Face preview" 
-                        className="w-full h-full object-cover"
-                      />
-                    ) : (
-                      <div className="flex flex-col items-center justify-center">
-                        <Film className="w-6 h-6 text-purple-400/50 group-hover:text-purple-400 transition-colors" />
-                      </div>
-                    )}
-                  </button>
-                </div>
-                
-                <input
-                  ref={iaFaceInputRef}
-                  type="file"
-                  accept="image/*"
-                  capture="user"
-                  onChange={handleIaFaceChange}
-                  className="hidden"
-                />
-
-                <div className="flex flex-col items-center gap-0.5">
-                  <span className={`text-[9px] font-bold tracking-wider ${isFaceDetected ? 'text-green-400 animate-pulse' : 'text-gray-500'}`}>
-                    {isFaceDetected ? 'VISO RILEVATO' : 'ATTESA FOTO IA'}
-                  </span>
-                  {isFallbackActive && (
-                    <span className="text-[7px] text-orange-400 flex items-center gap-1">
-                      <ShieldAlert size={8} /> Validazione semplificata attiva
-                    </span>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* SEZIONE SCUOLA - AGGIUNTA SOTTO IDENTITA DIGITALE */}
-            <div className="w-full pt-2 border-t border-white/10">
-              <label htmlFor="school" className="block text-[11px] font-medium text-gray-300 mb-1 text-center flex items-center justify-center gap-1">
-                <School className="w-3 h-3 text-yellow-400" />
-                Di che scuola sei? 🏫
+              <label htmlFor="school" className="block text-xs font-bold uppercase tracking-widest text-gray-400 mb-2 text-center flex items-center justify-center gap-1.5">
+                <School className="w-4 h-4 text-yellow-400" />
+                La tua scuola
               </label>
               <select
                 id="school"
                 value={schoolName}
                 onChange={(e) => {
                   setSchoolName(e.target.value);
-                  // MODIFICA: Invia l'evento solo la prima volta che l'utente seleziona una scuola
                   if (!hasTrackedSchool) {
                     trackFunnel('school_selected');
                     setHasTrackedSchool(true);
                   }
                 }}
                 disabled={isLoading}
-                className={`w-full px-3 py-2 bg-black/60 border rounded-lg text-white text-[15px] focus:outline-none focus:border-yellow-400/50 transition-all duration-300 appearance-none text-center ${
+                className={`w-full px-5 py-4 bg-zinc-900 border rounded-2xl text-white text-lg font-medium focus:outline-none focus:border-yellow-400/50 focus:ring-2 focus:ring-yellow-400/20 transition-all duration-300 appearance-none text-center ${
                   shakeFields && !schoolName 
                     ? 'border-red-500/60 animate-shake text-red-400' 
-                    : 'border-white/10'
+                    : 'border-white/10 hover:border-white/20'
                 }`}
                 style={{ textAlignLast: 'center' }}
               >
-                <option value="" disabled className="bg-black text-gray-500">Seleziona la tua scuola</option>
-                <option value="Polo" className="bg-zinc-900 text-white">Polo</option>
-                <option value="Fermi" className="bg-zinc-900 text-white">Fermi</option>
-                <option value="Montale" className="bg-zinc-900 text-white">Montale</option>
+                <option value="" disabled className="bg-black text-gray-500">Tocca per selezionare</option>
+                <option value="Polo" className="bg-zinc-900 text-white py-2">Polo</option>
+                <option value="Fermi" className="bg-zinc-900 text-white py-2">Fermi</option>
+                <option value="Montale" className="bg-zinc-900 text-white py-2">Montale</option>
               </select>
             </div>
           </div>
 
-          <div className="w-full mt-2 flex-shrink-0">
+          <div className="w-full mt-auto pt-6 flex-shrink-0 pb-4">
             {error && (
-              <div className="w-full mb-1.5 p-2 bg-red-500/10 border border-red-500/50 rounded-lg animate-fadeIn">
-                <p className="text-[10px] text-red-400 text-center font-medium">
+              <div className="w-full mb-4 p-3 bg-red-500/10 border border-red-500/50 rounded-xl animate-fadeIn">
+                <p className="text-xs text-red-400 text-center font-bold">
                   {error}
                 </p>
               </div>
@@ -597,18 +350,18 @@ export default function CompletamentoProfiloPage() {
             <button
               type="submit"
               disabled={isLoading}
-              className="w-full relative px-6 py-2.5 bg-gradient-to-r from-yellow-400 to-yellow-500 text-black font-bold text-sm rounded-lg transition-all duration-300 hover:scale-105 shadow-[0_0_25px_rgba(251,191,36,0.5)] hover:shadow-[0_0_35px_rgba(251,191,36,0.7)] disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-full relative px-6 py-4 bg-gradient-to-r from-yellow-400 to-yellow-500 text-black font-black text-base tracking-wide rounded-2xl transition-all duration-300 hover:scale-[1.03] shadow-[0_0_30px_rgba(251,191,36,0.4)] hover:shadow-[0_0_45px_rgba(251,191,36,0.6)] disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {isLoading ? (
-                <span className="flex items-center justify-center gap-2">
-                  <svg className="animate-spin h-4 w-4 text-black" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <span className="flex items-center justify-center gap-3">
+                  <svg className="animate-spin h-5 w-5 text-black" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                   </svg>
-                  <span className="text-xs">{loadingMessage || 'Salvataggio...'}</span>
+                  <span>{loadingMessage || 'Salvataggio...'}</span>
                 </span>
               ) : (
-                <span>SALVA PROFILO</span>
+                <span>SALVA E CONTINUA</span>
               )}
             </button>
           </div>
