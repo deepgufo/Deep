@@ -698,11 +698,11 @@ export default function CreaPage() {
               <Sparkles className="w-6 h-6 text-purple-400" />
             </div>
 
-            <h3 className="text-xl font-black text-white mb-2 tracking-tight text-center">
-              Ultimo step!
-            </h3>
-            <p className="text-xs text-zinc-400 text-center mb-6 leading-relaxed">
-              L'IA ha bisogno di un tuo primo piano ben illuminato per inserirti nel film.
+            <p className="text-sm text-white text-center mb-4 leading-relaxed font-medium">
+              Carica il tuo volto ora. Sarà il tuo pass universale per ogni POV della scuola. Fallo bene una volta.
+            </p>
+            <p className="text-[11px] text-zinc-400 text-center mb-6 leading-relaxed bg-white/5 p-3 rounded-xl border border-white/10">
+              💡 <span className="font-bold text-yellow-400">Regola d'oro:</span> Una foto chiara, da solo e ben illuminata garantisce un Face-Swap da paura. Niente occhiali, niente distrazioni.
             </p>
 
             <div className="w-full flex flex-col items-center mb-6">

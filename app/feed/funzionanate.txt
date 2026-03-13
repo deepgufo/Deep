@@ -14,8 +14,7 @@ import {
   Play,
   X,
   CheckCircle2,
-  Trophy,
-  Star
+  Trophy
 } from 'lucide-react';
 import Image from 'next/image';
 import PWAInstallPrompt from '../components/PWAInstallPrompt';
@@ -52,7 +51,6 @@ export default function FeedPage() {
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   
   const [userSchoolName, setUserSchoolName] = useState<string | null>(null);
-  const [unreadNotifCount, setUnreadNotifCount] = useState(0);
   
   // Stati UI
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
@@ -91,17 +89,6 @@ export default function FeedPage() {
       const { data: { session } } = await supabase.auth.getSession();
       const userId = session?.user?.id || null;
       setCurrentUserId(userId);
-
-      // Caricamento Badge Notifiche
-      if (userId && isInitial) {
-        const { count } = await supabase
-          .from('notifications')
-          .select('*', { count: 'exact', head: true })
-          .eq('user_id', userId)
-          .eq('is_read', false);
-        
-        setUnreadNotifCount(count || 0);
-      }
 
       // Recupero il school_name dell'utente se non lo abbiamo ancora
       let currentSchool = userSchoolName;
@@ -479,74 +466,46 @@ export default function FeedPage() {
         </div>
       )}
 
-      <header className="fixed top-0 left-0 right-0 z-50 bg-black/90 backdrop-blur-xl border-b border-white/5 h-[56px] flex items-center">
-        <div className="w-full max-w-md mx-auto flex items-center justify-between px-4 relative h-full">
+      <header className="fixed top-0 left-0 right-0 z-50 bg-black/90 backdrop-blur-xl border-b border-white/5">
+        <div className="max-w-md mx-auto flex items-center justify-center gap-8 px-4 py-2.5">
+          <button
+            onClick={() => setActiveTab('film')}
+            className={`relative pb-1 transition-all duration-300 ${
+              activeTab === 'film'
+                ? 'text-white text-base font-bold'
+                : 'text-zinc-600 text-sm font-semibold'
+            }`}
+          >
+            Film
+            {activeTab === 'film' && (
+              <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-[#D4AF37] rounded-full"></div>
+            )}
+          </button>
           
-          <div className="flex-1" />
-          
-          <div className="flex gap-8 absolute left-1/2 -translate-x-1/2">
-            <button
-              onClick={() => setActiveTab('film')}
-              className={`relative pb-1 transition-all duration-300 ${
-                activeTab === 'film'
-                  ? 'text-white text-base font-bold'
-                  : 'text-zinc-600 text-sm font-semibold'
-              }`}
-            >
-              Film
-              {activeTab === 'film' && (
-                <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-[#D4AF37] rounded-full"></div>
-              )}
-            </button>
-            
-            <button
-              onClick={() => setActiveTab('school')}
-              className={`relative pb-1 transition-all duration-300 uppercase ${
-                activeTab === 'school'
-                  ? 'text-white text-base font-bold'
-                  : 'text-zinc-600 text-sm font-semibold'
-              }`}
-            >
-              {userSchoolName ? userSchoolName : 'Scuola'}
-              {activeTab === 'school' && (
-                <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-[#D4AF37] rounded-full"></div>
-              )}
-            </button>
-          </div>
-
-          <div className="flex-1 flex justify-end h-full items-center">
-            <button 
-              onClick={() => router.push('/notifiche')}
-              className="relative flex flex-col items-center justify-center gap-0.5 px-2"
-            >
-              <div className="relative">
-                <Star 
-                  className={`w-[22px] h-[22px] drop-shadow-[0_2px_4px_rgba(0,0,0,0.5)] transition-colors ${
-                    unreadNotifCount > 0 ? 'text-[#D4AF37] fill-[#D4AF37]' : 'text-white'
-                  }`} 
-                />
-                {unreadNotifCount > 0 && (
-                  <div className="absolute -top-1.5 -right-2 min-w-[16px] h-[16px] bg-red-600 border border-black rounded-full flex items-center justify-center text-[9px] font-bold text-white px-1 shadow-[0_0_8px_rgba(220,38,38,0.5)]">
-                    {unreadNotifCount > 99 ? '99+' : unreadNotifCount}
-                  </div>
-                )}
-              </div>
-              <span className={`text-[8px] font-semibold drop-shadow-md ${unreadNotifCount > 0 ? 'text-[#D4AF37]' : 'text-white/80'}`}>
-                Notifiche
-              </span>
-            </button>
-          </div>
+          <button
+            onClick={() => setActiveTab('school')}
+            className={`relative pb-1 transition-all duration-300 uppercase ${
+              activeTab === 'school'
+                ? 'text-white text-base font-bold'
+                : 'text-zinc-600 text-sm font-semibold'
+            }`}
+          >
+            {userSchoolName ? userSchoolName : 'Scuola'}
+            {activeTab === 'school' && (
+              <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-[#D4AF37] rounded-full"></div>
+            )}
+          </button>
         </div>
       </header>
 
-      <div className="h-full overflow-y-auto snap-y snap-mandatory pt-[56px] pb-20" style={{ scrollSnapType: 'y mandatory' }}>
+      <div className="h-full overflow-y-auto snap-y snap-mandatory pt-[48px] pb-20" style={{ scrollSnapType: 'y mandatory' }}>
         {posts.length > 0 ? (
           posts.map((post) => (
             <div
               key={post.id}
-              className="h-[calc(100vh-56px)] snap-start flex items-center justify-center"
+              className="h-[calc(100vh-48px)] snap-start flex items-center justify-center"
             >
-              <div className="relative w-full h-[calc(100vh-148px)] max-w-[390px] mx-auto flex flex-col bg-black">
+              <div className="relative w-full h-[calc(100vh-140px)] max-w-[390px] mx-auto flex flex-col bg-black">
                 
                 <div className="h-[70px] bg-black flex items-center justify-between px-4 flex-shrink-0">
                   <button
