@@ -34,22 +34,27 @@ export default function CercaPage() {
   }, []);
 
   useEffect(() => {
+    // AbortController per annullare le richieste fetch pendenti se l'utente digita ancora
+    const controller = new AbortController();
+
     const performSearch = async () => {
       // --- LOGICA FILTRO CARATTERI ---
       // Se la query è meno di 3 caratteri, svuotiamo i risultati e non interpelliamo il DB
       if (searchQuery.trim().length < 3) {
         setSearchResults([]);
+        setIsSearching(false);
         return;
       }
 
       setIsSearching(true);
 
       try {
-        // Query base
+        // Query base ottimizzata scaricando solo i campi necessari
         let query = supabase
           .from('profiles')
           .select('id, username, full_name, avatar_url')
-          .or(`username.ilike.%${searchQuery}%,full_name.ilike.%${searchQuery}%`);
+          .or(`username.ilike.%${searchQuery}%,full_name.ilike.%${searchQuery}%`)
+          .abortSignal(controller.signal); // Colleghiamo il segnale per annullare la query se necessario
 
         // --- FILTRO SELF-PROFILE: Escludi l'utente loggato ---
         if (currentUserId) {
@@ -59,14 +64,18 @@ export default function CercaPage() {
         const { data, error } = await query.limit(20);
 
         if (error) {
-          console.error('❌ Errore ricerca:', error);
+          if (error.message !== 'Fetch is aborted') {
+            console.error('❌ Errore ricerca:', error);
+          }
           return;
         }
 
         setSearchResults(data || []);
         console.log(`✅ Trovati ${data?.length || 0} profili (escludendo self)`);
-      } catch (err) {
-        console.error('❌ Errore:', err);
+      } catch (err: any) {
+        if (err.name !== 'AbortError') {
+          console.error('❌ Errore:', err);
+        }
       } finally {
         setIsSearching(false);
       }
@@ -76,7 +85,10 @@ export default function CercaPage() {
       performSearch();
     }, 300);
 
-    return () => clearTimeout(timeoutId);
+    return () => {
+      clearTimeout(timeoutId);
+      controller.abort(); // Annulla la richiesta se l'utente digita un altro carattere
+    };
   }, [searchQuery, currentUserId]);
 
   // --- NAVIGAZIONE VERSO IL PROFILO ALTRUI ---

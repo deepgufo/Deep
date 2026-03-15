@@ -123,7 +123,7 @@ export default function FeedPage() {
 
       let query;
 
-      // --- LOGICA FEED SCUOLA (DENORMALIZZATA) ---
+      // --- LOGICA FEED SCUOLA E PUBBLICO CON CONTEGGIO LIKES INTEGRATO ---
       if (activeTab === 'school') {
         if (!currentSchool) {
           setPosts([]);
@@ -133,7 +133,6 @@ export default function FeedPage() {
           return;
         }
 
-        // Utilizziamo la colonna school_name direttamente su public_videos
         query = supabase
           .from('public_videos')
           .select(`
@@ -148,14 +147,14 @@ export default function FeedPage() {
               full_name,
               username,
               avatar_url
-            )
+            ),
+            likes (count)
           `)
-          .eq('school_name', currentSchool) // Filtro diretto sulla tabella video
+          .eq('school_name', currentSchool)
           .order('created_at', { ascending: false })
           .range(start, end);
           
       } else {
-        // Query Pubblica (FILM): Intoccata
         query = supabase
           .from('public_videos')
           .select(`
@@ -169,7 +168,8 @@ export default function FeedPage() {
               full_name,
               username,
               avatar_url
-            )
+            ),
+            likes (count)
           `)
           .order('created_at', { ascending: false })
           .range(start, end);
@@ -194,37 +194,41 @@ export default function FeedPage() {
         setHasMore(false);
       }
 
-      const transformedPosts: Post[] = await Promise.all(
-        (videosData || []).map(async (video: any) => {
-          const { count: likesCount } = await supabase
-            .from('likes')
-            .select('*', { count: 'exact', head: true })
-            .eq('film_id', video.id);
+      // Estrai tutti gli ID dei video correnti per fare una singola query dei "miei like"
+      const videoIds = videosData.map(v => v.id);
+      
+      let userLikesSet = new Set<string>();
+      if (userId && videoIds.length > 0) {
+        // Un'unica query per sapere a quali di questi 3 video l'utente ha messo like
+        const { data: userLikesData } = await supabase
+          .from('likes')
+          .select('film_id')
+          .eq('user_id', userId)
+          .in('film_id', videoIds);
 
-          let hasUserLiked = false;
-          if (userId) {
-            const { data: likeData } = await supabase
-              .from('likes')
-              .select('id')
-              .eq('film_id', video.id)
-              .eq('user_id', userId)
-              .maybeSingle();
-            
-            hasUserLiked = !!likeData;
-          }
+        if (userLikesData) {
+          userLikesData.forEach(like => userLikesSet.add(like.film_id));
+        }
+      }
 
-          return {
-            id: video.id,
-            video_url: video.video_url,
-            prompt: video.caption || '',
-            created_at: video.created_at,
-            user_id: video.user_id,
-            profile: video.profiles,
-            likes_count: likesCount || 0,
-            has_user_liked: hasUserLiked
-          };
-        })
-      );
+      const transformedPosts: Post[] = videosData.map((video: any) => {
+        // Gestione corretta della risposta likes(count) di Supabase
+        let likesCount = 0;
+        if (Array.isArray(video.likes) && video.likes.length > 0) {
+            likesCount = video.likes[0].count;
+        }
+
+        return {
+          id: video.id,
+          video_url: video.video_url,
+          prompt: video.caption || '',
+          created_at: video.created_at,
+          user_id: video.user_id,
+          profile: video.profiles,
+          likes_count: likesCount,
+          has_user_liked: userLikesSet.has(video.id)
+        };
+      });
 
       setPosts(prev => isInitial ? transformedPosts : [...prev, ...transformedPosts]);
 
@@ -634,6 +638,7 @@ export default function FeedPage() {
                     data-id={post.id}
                     src={post.video_url}
                     className="w-full h-full object-cover"
+                    preload="metadata"
                     loop
                     playsInline
                   />

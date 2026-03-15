@@ -43,13 +43,21 @@ export default function FinalizzazioneClient({
   const [showPublishMenu, setShowPublishMenu] = useState(false);
   const [isPublishing, setIsPublishing] = useState(false);
 
-  const [loadingMessage, setLoadingMessage] = useState("L'IA sta studiando i tuoi lineamenti...");
+  const [loadingMessage, setLoadingMessage] = useState("Silenzio in aula, il regista sta montando la tua scena...");
+  
   const messages = [
-    "Analisi dei tratti somatici in corso...",
-    "Sincronizzazione dei movimenti del volto...",
-    "Applicazione luci cinematografiche...",
-    "Rendering dei fotogrammi finali...",
-    "Quasi pronto: il tuo debutto è vicino!"
+    "Silenzio in aula, il regista sta montando la tua scena...",
+    "Sviluppando la pellicola... Deep non accetta errori.",
+    "Aggiungendo filtri illegali per renderti presentabile.",
+    "Criptando il video per non farlo vedere al Preside...",
+    "Distraendo il prof di Latino mentre finiamo il caricamento.",
+    "DeepFly sta infiltrando i server... un momento di pazienza.",
+    "Stiamo calcolando i tuoi lineamenti. L'IA sta facendo magie.",
+    "Rendering 45%... Ottimizzazione ombre...",
+    "Applicazione Face-Swap in corso...",
+    "Miglioramento risoluzione... Deep mode attivata.",
+    "Non mollare ora, il finale è la parte migliore.",
+    "Sapevi che hanno già premiato 20 video oggi? Non farti battere."
   ];
 
   // --- FUNZIONE DI TRACCIAMENTO SATISFACTION FUNNEL ---
@@ -152,12 +160,12 @@ export default function FinalizzazioneClient({
   useEffect(() => {
     let pollInterval: NodeJS.Timeout;
     let msgInterval: NodeJS.Timeout;
-    let msgIndex = 0;
 
+    // Gestione messaggi random ogni 7 secondi
     msgInterval = setInterval(() => {
-      msgIndex = (msgIndex + 1) % messages.length;
-      setLoadingMessage(messages[msgIndex]);
-    }, 4000);
+      const randomIndex = Math.floor(Math.random() * messages.length);
+      setLoadingMessage(messages[randomIndex]);
+    }, 7000);
 
     const startFaceSwap = async () => {
       if (hasStartedRequest.current) return;
@@ -206,7 +214,6 @@ export default function FinalizzazioneClient({
               clearInterval(msgInterval);
               
               // TRACCIAMENTO FINE GENERAZIONE (Cronometro Stop)
-              // Lo spariamo subito appena il server dice ok, prima ancora dell'animazione visiva
               if (!hasTrackedReady.current) {
                 hasTrackedReady.current = true;
                 await trackSatisfactionEvent('video_ready');
@@ -219,7 +226,6 @@ export default function FinalizzazioneClient({
               }, 1500);
               
             } else if (prediction.status === 'failed') {
-              // Se fallisce, fermiamo il cronometro lo stesso per non sballare le medie con "attese infinite"
               await trackSatisfactionEvent('video_failed');
               throw new Error(prediction.error || "L'elaborazione cinematografica non è andata a buon fine.");
             } else if (prediction.status === 'starting') {
@@ -265,7 +271,7 @@ export default function FinalizzazioneClient({
   const handlePublishAction = async (status: 'pubblico' | 'privato') => {
     if (!finalVideoUrl) return;
     
-    // TRACCIAMENTO IMMEDIATO: Registriamo l'intenzione prima che il server ci faccia aspettare
+    // TRACCIAMENTO IMMEDIATO
     if (status === 'pubblico') {
       trackSatisfactionEvent('video_published');
     } else {
@@ -484,8 +490,12 @@ export default function FinalizzazioneClient({
               </div>
 
               <div className="space-y-2 mb-8 px-6">
-                <h2 className="text-white font-bold text-lg leading-tight">{loadingMessage}</h2>
-                <p className="text-gray-500 text-xs font-medium">L'IA sta generating il tuo capolavoro...</p>
+                <h2 className="text-white font-bold text-lg leading-tight h-[60px] flex items-center justify-center italic tracking-tight">
+                  &quot;{loadingMessage}&quot;
+                </h2>
+                <p className="text-gray-500 text-xs font-medium uppercase tracking-widest">
+                  L&apos;IA sta lavorando sul set...
+                </p>
               </div>
 
               <div className="px-10">
@@ -496,13 +506,13 @@ export default function FinalizzazioneClient({
                   />
                 </div>
                 <div className="flex justify-between items-start mt-3">
-                  <p className="text-[10px] text-zinc-500 font-medium opacity-60 flex items-center gap-1.5 mt-1">
-                    <AlertCircle className="w-2.5 h-2.5" />
+                  <p className="text-[13px] text-red-500 font-bold flex items-center gap-1.5 mt-1">
+                    <AlertCircle className="w-4 h-4" />
                     non uscire dall&apos;app durante il caricamento
                   </p>
                   <div className="text-right">
-                    <span className="text-[10px] text-yellow-400 font-black">{Math.round(progress)}%</span>
-                    <p className="text-[9px] text-zinc-600 font-medium italic">tempo stimato: 2-3 minuti</p>
+                    <span className="text-[12px] text-yellow-400 font-black">{Math.round(progress)}%</span>
+                    <p className="text-[12px] text-purple-400 font-bold italic">tempo stimato: 2-3 minuti</p>
                   </div>
                 </div>
               </div>
