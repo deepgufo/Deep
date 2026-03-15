@@ -58,6 +58,7 @@ export default function FeedPage() {
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [pausedVideos, setPausedVideos] = useState<Set<string>>(new Set());
   const [confettiActive, setConfettiActive] = useState<string | null>(null);
+  const [bigTrophyActive, setBigTrophyActive] = useState<string | null>(null); // Nuovo stato per l'animazione centrale
   const [expandedPosts, setExpandedPosts] = useState<Set<string>>(new Set());
 
   // Stati Segnalazione
@@ -69,6 +70,9 @@ export default function FeedPage() {
   // Refs per video, intersection observer e paginazione
   const videoRefs = useRef<{ [key: string]: HTMLVideoElement | null }>({});
   const observerRef = useRef<IntersectionObserver | null>(null);
+
+  // Ref per il doppio click
+  const lastClickTime = useRef<{ [key: string]: number }>({});
 
   // --- LOGICA TRIGGER PWA DOPO 30 SECONDI ---
   useEffect(() => {
@@ -296,7 +300,11 @@ export default function FeedPage() {
     
     if (!wasLiked) {
       setConfettiActive(postId);
-      setTimeout(() => setConfettiActive(null), 2200);
+      setBigTrophyActive(postId);
+      setTimeout(() => {
+        setConfettiActive(null);
+        setBigTrophyActive(null);
+      }, 1500); // L'animazione centrale sparisce dopo 1.5 secondi
     }
     
     setPosts((prev) =>
@@ -377,25 +385,53 @@ export default function FeedPage() {
     }
   };
 
-  // --- TOGGLE PLAY/PAUSE ---
+  // --- TOGGLE PLAY/PAUSE E DOPPIO CLICK ---
   const handleVideoClick = (postId: string) => {
-    const video = videoRefs.current[postId];
-    if (!video) return;
+    const now = Date.now();
+    const lastClick = lastClickTime.current[postId] || 0;
+    const timeDiff = now - lastClick;
 
-    if (video.paused) {
-      video.play();
-      setPausedVideos((prev) => {
-        const newSet = new Set(prev);
-        newSet.delete(postId);
-        return newSet;
-      });
+    if (timeDiff < 300) {
+      // È un DOPPIO CLICK
+      lastClickTime.current[postId] = 0; // Resetta per evitare falsi positivi successivi
+      
+      // Mettiamo like solo se l'utente non l'ha già messo
+      const post = posts.find((p) => p.id === postId);
+      if (post && !post.has_user_liked) {
+        handleLikeToggle(postId);
+      } else {
+        // Mostriamo comunque l'animazione gratificante se lo aveva già messo
+        setBigTrophyActive(postId);
+        setTimeout(() => setBigTrophyActive(null), 1500);
+      }
     } else {
-      video.pause();
-      setPausedVideos((prev) => {
-        const newSet = new Set(prev);
-        newSet.add(postId);
-        return newSet;
-      });
+      // È un CLICK SINGOLO (Play/Pause)
+      lastClickTime.current[postId] = now;
+      
+      // Ritardo leggermente il play/pause per aspettare e vedere se diventa un doppio click
+      setTimeout(() => {
+        // Se nel frattempo l'ora dell'ultimo click è stata resettata a 0, era un doppio click, quindi ignoriamo il play/pause
+        if (lastClickTime.current[postId] !== now) return;
+
+        const video = videoRefs.current[postId];
+        if (!video) return;
+
+        if (video.paused) {
+          video.play();
+          setPausedVideos((prev) => {
+            const newSet = new Set(prev);
+            newSet.delete(postId);
+            return newSet;
+          });
+        } else {
+          video.pause();
+          setPausedVideos((prev) => {
+            const newSet = new Set(prev);
+            newSet.add(postId);
+            return newSet;
+          });
+        }
+      }, 250); // Attendiamo 250ms per capire le intenzioni
     }
   };
 
@@ -643,9 +679,18 @@ export default function FeedPage() {
                     playsInline
                   />
 
-                  {pausedVideos.has(post.id) && (
+                  {/* ANIMAZIONE CENTRALE: BIG TROPHY */}
+                  {bigTrophyActive === post.id && (
+                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-40">
+                      <div className="animate-popTrophy drop-shadow-[0_0_30px_rgba(212,175,55,0.8)]">
+                        <Trophy className="w-32 h-32 text-[#D4AF37] fill-[#D4AF37]" />
+                      </div>
+                    </div>
+                  )}
+
+                  {pausedVideos.has(post.id) && !bigTrophyActive && (
                     <div className="absolute inset-0 flex items-center justify-center z-30 bg-black/20">
-                      <div className="w-16 h-16 flex items-center justify-center rounded-full bg-white/20 backdrop-blur-md">
+                      <div className="w-16 h-16 flex items-center justify-center rounded-full bg-white/20 backdrop-blur-md animate-fadeIn">
                         <Play className="w-8 h-8 text-white fill-white" />
                       </div>
                     </div>
@@ -782,6 +827,17 @@ export default function FeedPage() {
         @keyframes fadeIn {
           from { opacity: 0; transform: translateY(-10px); }
           to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Animazione per il doppio click (Coppa gigante) */
+        @keyframes popTrophy {
+          0% { opacity: 0; transform: scale(0.5) rotate(-15deg); }
+          30% { opacity: 1; transform: scale(1.2) rotate(5deg); }
+          70% { opacity: 1; transform: scale(1) rotate(0deg); }
+          100% { opacity: 0; transform: scale(1.5) translateY(-50px); }
+        }
+        .animate-popTrophy {
+          animation: popTrophy 1.2s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
         }
         
         .confetti {
