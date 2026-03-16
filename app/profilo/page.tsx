@@ -1044,7 +1044,7 @@ function ProfiloContent() {
                       <input type="file" accept="image/*" onChange={handleAvatarChange} className="hidden" />
                     </label>
                   </div>
-                  <p className="mt-3 text-[10px] font-black uppercase tracking-widest text-zinc-500">Avatar Pubblico</p>
+                  <p className="mt-3 text-[10px] font-black uppercase tracking-widest text-zinc-500">Foto Profilo</p>
                 </div>
 
                 {/* FORM FIELDS */}

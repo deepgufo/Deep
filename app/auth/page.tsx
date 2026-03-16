@@ -208,8 +208,8 @@ export default function AuthPage() {
         console.log('Profilo non trovato (PGRST116), redirect a /completamento-profilo');
         router.push('/completamento-profilo');
       } else if (existingProfile && !profileError) {
-        console.log('Profilo esistente trovato, redirect a /profilo');
-        router.push('/profilo');
+        console.log('Profilo esistente trovato, redirect a /crea');
+        router.push('/crea');
       } else {
         // Altri errori → completamento profilo per sicurezza
         console.log('Errore verifica profilo o profilo non trovato, redirect a /completamento-profilo');
