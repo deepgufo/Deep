@@ -26,15 +26,20 @@ import {
   Download,
   Share2,
   MoreVertical,
-  Globe2
+  Globe2,
+  Sparkles,
+  ShieldAlert,
+  Loader2
 } from 'lucide-react';
 import Image from 'next/image';
+import { validateFaceImage } from '@/utils/faceValidation';
 
 // --- INTERFACCE E TIPI ---
 interface UserProfile {
   id: string;
   full_name: string;
   avatar_url: string | null;
+  ia_face_url: string | null;
   username: string;
   bio: string | null;
   gender: string;
@@ -86,6 +91,16 @@ function ProfiloContent() {
   const [editAvatarFile, setEditAvatarFile] = useState<File | null>(null);
   const [editAvatarPreview, setEditAvatarPreview] = useState<string | null>(null);
   const [isSavingProfile, setIsSavingProfile] = useState(false);
+
+  // --- STATI FOTO AI (LOGICA CREA) ---
+  const iaFaceInputRef = useRef<HTMLInputElement>(null);
+  const [iaFacePreview, setIaFacePreview] = useState<string | null>(null);
+  const [selectedIaFaceFile, setSelectedIaFaceFile] = useState<File | null>(null);
+  const [isFaceLoading, setIsFaceLoading] = useState(false);
+  const [faceLoadingMessage, setFaceLoadingMessage] = useState('');
+  const [faceError, setFaceError] = useState('');
+  const [isFaceDetected, setIsFaceDetected] = useState(false);
+  const [isFallbackActive, setIsFallbackActive] = useState(false);
   
   // --- STATI UI AGGIUNTIVI ---
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null);
@@ -118,7 +133,7 @@ function ProfiloContent() {
   useEffect(() => {
     const checkInstallation = () => {
       const isStandalone = window.matchMedia('(display-mode: standalone)').matches 
-                           || (window.navigator as any).standalone;
+                            || (window.navigator as any).standalone;
       
       const ua = window.navigator.userAgent.toLowerCase();
       const isMobile = /iphone|ipad|ipod|android/.test(ua);
@@ -163,7 +178,7 @@ function ProfiloContent() {
 
         const profilePromise = supabase
           .from('profiles')
-          .select('id, full_name, avatar_url, username, bio, gender, total_oscar_received')
+          .select('id, full_name, avatar_url, ia_face_url, username, bio, gender, total_oscar_received')
           .eq('id', userId)
           .single();
 
@@ -252,6 +267,86 @@ function ProfiloContent() {
     };
   }, [router]);
 
+  // --- LOGICA FOTO AI (REPLICATA DA CREA) ---
+  const calculateBrightness = (imageFile: File): Promise<{ brightness: number, img: HTMLImageElement, canvas: HTMLCanvasElement }> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new window.Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          const ctx = canvas.getContext('2d');
+          if (!ctx) { reject(new Error('Canvas context non disponibile')); return; }
+          const scale = Math.min(400 / img.width, 400 / img.height);
+          canvas.width = img.width * scale;
+          canvas.height = img.height * scale;
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          const data = imageData.data;
+          let totalBrightness = 0;
+          for (let i = 0; i < data.length; i += 4) {
+            const r = data[i]; const g = data[i + 1]; const b = data[i + 2];
+            const brightness = 0.299 * r + 0.587 * g + 0.114 * b;
+            totalBrightness += brightness;
+          }
+          const averageBrightness = totalBrightness / (data.length / 4);
+          resolve({ brightness: averageBrightness, img, canvas });
+        };
+        img.onerror = () => reject(new Error('Errore caricamento immagine'));
+        img.src = e.target?.result as string;
+      };
+      reader.onerror = () => reject(new Error('Errore lettura file'));
+      reader.readAsDataURL(imageFile);
+    });
+  };
+
+  const handleIaFaceChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (!file.type.startsWith('image/')) { setFaceError('Seleziona un file immagine'); return; }
+      if (file.size > 5 * 1024 * 1024) { setFaceError('L\'immagine deve essere inferiore a 5MB'); return; }
+      try {
+        setIsFaceLoading(true);
+        setFaceLoadingMessage('Analisi biometrica...');
+        setIsFaceDetected(false);
+        setIsFallbackActive(false);
+        const { brightness, img, canvas } = await calculateBrightness(file);
+        if (brightness < 45) {
+          setFaceError('⚠️ Foto troppo scura! Spostati in un punto più illuminato.');
+          setIaFacePreview(null);
+          setSelectedIaFaceFile(null);
+          setIsFaceLoading(false);
+          return; 
+        }
+        const validationPromise = validateFaceImage(img, canvas);
+        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('TIMEOUT')), 5000));
+        try {
+          const validation = await Promise.race([validationPromise, timeoutPromise]) as { valid: boolean; error?: string };
+          if (!validation.valid) {
+            setFaceError(`⚠️ ${validation.error}`);
+            setIaFacePreview(null);
+            setSelectedIaFaceFile(null);
+            setIsFaceLoading(false);
+            return;
+          }
+          setIsFaceDetected(true);
+        } catch (err: any) {
+          if (err.message === 'TIMEOUT') { setIsFallbackActive(true); setIsFaceDetected(true); } else { throw err; }
+        }
+        setSelectedIaFaceFile(file);
+        setFaceError('');
+        const reader = new FileReader();
+        reader.onloadend = () => { setIaFacePreview(reader.result as string); };
+        reader.readAsDataURL(file);
+      } catch (err) {
+        console.error('Errore validazione:', err);
+        setFaceError('Errore durante l\'analisi. Riprova.');
+      } finally {
+        setIsFaceLoading(false);
+      }
+    }
+  };
+
   // --- GESTIONE MODIFICA PROFILO ---
   const openEditModal = () => {
     if (profile) {
@@ -259,6 +354,9 @@ function ProfiloContent() {
       setEditBio(profile.bio || '');
       setEditUsername(profile.username || '');
       setEditAvatarPreview(profile.avatar_url);
+      setIaFacePreview(profile.ia_face_url);
+      setFaceError('');
+      setIsFaceDetected(false);
       setIsEditModalOpen(true);
     }
   };
@@ -268,6 +366,8 @@ function ProfiloContent() {
     setIsEditModalOpen(false);
     setEditAvatarFile(null);
     setEditAvatarPreview(null);
+    setSelectedIaFaceFile(null);
+    setIaFacePreview(null);
   };
 
   const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -294,35 +394,44 @@ function ProfiloContent() {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session?.user) throw new Error("Sessione mancante");
 
+      const userId = session.user.id;
       let avatarUrl = profile.avatar_url;
+      let iaFaceUrl = profile.ia_face_url;
 
+      // 1. Upload Avatar Normale
       if (editAvatarFile) {
         const fileExt = editAvatarFile.name.split('.').pop();
-        const fileName = `${session.user.id}-${Date.now()}.${fileExt}`;
-
+        const fileName = `${userId}-${Date.now()}.${fileExt}`;
         const { error: uploadError } = await supabase.storage
           .from('avatars')
           .upload(fileName, editAvatarFile, { upsert: true });
-
         if (uploadError) throw uploadError;
-
-        const { data: urlData } = supabase.storage
-          .from('avatars')
-          .getPublicUrl(fileName);
-
+        const { data: urlData } = supabase.storage.from('avatars').getPublicUrl(fileName);
         avatarUrl = urlData.publicUrl;
       }
 
+      // 2. Upload Foto AI (Se cambiata)
+      if (selectedIaFaceFile) {
+        const iaExt = selectedIaFaceFile.name.split('.').pop();
+        const iaFileName = `${userId}/ia-face-${Date.now()}.${iaExt}`;
+        const { error: iaUploadError } = await supabase.storage
+          .from('ia-faces')
+          .upload(iaFileName, selectedIaFaceFile, { cacheControl: '3600', upsert: true });
+        if (iaUploadError) throw iaUploadError;
+        const { data: iaUrlData } = supabase.storage.from('ia-faces').getPublicUrl(iaFileName);
+        iaFaceUrl = iaUrlData.publicUrl;
+      }
+
       const updatedData = {
-        id: session.user.id,
+        id: userId,
         full_name: editName,
         bio: editBio,
         username: editUsername,
         avatar_url: avatarUrl,
+        ia_face_url: iaFaceUrl,
         updated_at: new Date().toISOString()
       };
 
-      // MODIFICA: Usiamo il client standard 'supabase' al posto di 'supabaseAdmin'
       const { error: updateError } = await supabase
         .from('profiles')
         .upsert(updatedData);
@@ -335,6 +444,7 @@ function ProfiloContent() {
         bio: editBio,
         username: editUsername,
         avatar_url: avatarUrl,
+        ia_face_url: iaFaceUrl,
       });
 
       setFeedbackMessage({ type: 'success', text: 'Profilo aggiornato!' });
@@ -607,7 +717,7 @@ function ProfiloContent() {
         <div className={`fixed top-20 left-1/2 -translate-x-1/2 z-[5000] px-6 py-3 rounded-full shadow-2xl flex items-center gap-3 animate-bounce ${
           feedbackMessage.type === 'success' ? 'bg-green-500' : 'bg-red-500'
         }`}>
-          {feedbackMessage.type === 'success' ? <CheckCircle2 className="w-5 h-5" /> : <AlertCircle className="w-5 h-5" />}
+          {feedbackMessage.type === 'success' ? <CheckCircle2 className="w-5 h-5 text-white" /> : <AlertCircle className="w-5 h-5 text-white" />}
           <span className="font-bold text-sm uppercase">{feedbackMessage.text}</span>
         </div>
       )}
@@ -748,8 +858,8 @@ function ProfiloContent() {
                   activeTab === 'provini' ? 'text-white' : 'text-zinc-600'
                 }`}
               >
-                <Lock className="w-4 h-4" />
                 <span className="text-xs font-bold uppercase tracking-wider">Provini</span>
+                <Lock className="w-4 h-4 ml-2" />
                 {activeTab === 'provini' && <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-white"></div>}
               </button>
             </div>
@@ -917,39 +1027,29 @@ function ProfiloContent() {
               </div>
 
               <div className="p-6 max-h-[70vh] overflow-y-auto custom-scrollbar">
-                {/* AVATAR PICKER */}
+                {/* 1. AVATAR PICKER (Profilo Pubblico) */}
                 <div className="flex flex-col items-center mb-8">
                   <div className="relative group">
-                    <div className="w-28 h-28 rounded-full overflow-hidden border-2 border-zinc-800 bg-black shadow-xl relative">
+                    <div className="w-24 h-24 rounded-full overflow-hidden border-2 border-zinc-800 bg-black shadow-xl relative">
                       {editAvatarPreview ? (
                         <img src={editAvatarPreview} alt="Preview" className="w-full h-full object-cover" />
                       ) : (
                         <div className="w-full h-full flex items-center justify-center text-zinc-700">
-                          <UserIcon className="w-12 h-12" />
+                          <UserIcon className="w-10 h-10" />
                         </div>
                       )}
                     </div>
                     <label className="absolute inset-0 flex items-center justify-center bg-black/70 opacity-0 group-hover:opacity-100 transition-all cursor-pointer rounded-full backdrop-blur-sm">
-                      <Upload className="w-6 h-6 text-yellow-400" />
+                      <Upload className="w-5 h-5 text-yellow-400" />
                       <input type="file" accept="image/*" onChange={handleAvatarChange} className="hidden" />
                     </label>
                   </div>
-                  <p className="mt-4 text-xs font-semibold text-yellow-400">Cambia Foto</p>
+                  <p className="mt-3 text-[10px] font-black uppercase tracking-widest text-zinc-500">Avatar Pubblico</p>
                 </div>
 
                 {/* FORM FIELDS */}
-                <div className="space-y-5">
-                  <div className="space-y-2">
-                    <label className="block text-xs font-semibold text-zinc-500">Nome Completo</label>
-                    <input 
-                      type="text"
-                      value={editName}
-                      onChange={(e) => setEditName(e.target.value)}
-                      className="w-full bg-zinc-900 border border-zinc-800 text-white px-4 py-3 rounded-xl focus:outline-none focus:border-yellow-400 focus:ring-1 focus:ring-yellow-400/50 transition-all"
-                      placeholder="Il tuo nome"
-                    />
-                  </div>
-
+                <div className="space-y-6">
+                  
                   <div className="space-y-2">
                     <label className="block text-xs font-semibold text-zinc-500">Username</label>
                     <div className="relative">
@@ -967,16 +1067,78 @@ function ProfiloContent() {
                   <div className="space-y-2">
                     <label className="block text-xs font-semibold text-zinc-500">Bio</label>
                     <textarea 
-                      rows={4}
+                      rows={3}
                       value={editBio}
                       onChange={(e) => setEditBio(e.target.value)}
                       placeholder="Racconta qualcosa di te..."
                       className="w-full bg-zinc-900 border border-zinc-800 text-white px-4 py-3 rounded-xl focus:outline-none focus:border-yellow-400 focus:ring-1 focus:ring-yellow-400/50 transition-all resize-none text-sm leading-relaxed"
                     />
                     <div className="flex justify-end">
-                      <span className={`text-xs font-semibold ${editBio.length > 180 ? 'text-red-500' : 'text-zinc-600'}`}>
+                      <span className={`text-[10px] font-semibold ${editBio.length > 180 ? 'text-red-500' : 'text-zinc-600'}`}>
                         {editBio.length}/200
                       </span>
+                    </div>
+                  </div>
+
+                  {/* 2. IA FACE PICKER (Foto Lineamenti) */}
+                  <div className="pt-4 border-t border-zinc-900">
+                    <div className="flex items-center gap-2 mb-4">
+                       <Sparkles className="w-4 h-4 text-purple-400" />
+                       <label className="text-xs font-bold text-zinc-300 uppercase tracking-tight">Foto Identità IA (Face-Swap)</label>
+                    </div>
+                    
+                    <div className="flex flex-col items-center bg-zinc-900/30 p-5 rounded-2xl border border-white/5">
+                        <div className="relative mb-4">
+                            <div className={`absolute -inset-2 border-2 rounded-xl pointer-events-none transition-all duration-500 ${
+                              isFaceDetected 
+                                ? 'border-green-500 shadow-[0_0_15px_rgba(34,197,94,0.4)]' 
+                                : 'border-purple-400/30'
+                            }`} />
+                            
+                            <button
+                              type="button"
+                              onClick={() => iaFaceInputRef.current?.click()}
+                              className="relative w-20 h-28 rounded-lg bg-black border border-white/10 flex items-center justify-center group overflow-hidden"
+                            >
+                              {iaFacePreview ? (
+                                <img src={iaFacePreview} alt="IA Face preview" className="w-full h-full object-cover" />
+                              ) : (
+                                <div className="flex flex-col items-center justify-center">
+                                  <Camera className="w-6 h-6 text-purple-400/50 group-hover:text-purple-400 transition-colors" />
+                                </div>
+                              )}
+                            </button>
+                        </div>
+                        
+                        <input
+                          ref={iaFaceInputRef}
+                          type="file"
+                          accept="image/*"
+                          capture="user"
+                          onChange={handleIaFaceChange}
+                          className="hidden"
+                        />
+
+                        <div className="text-center">
+                            <span className={`text-[10px] font-bold tracking-wider uppercase ${isFaceDetected ? 'text-green-400 animate-pulse' : 'text-zinc-500'}`}>
+                              {isFaceDetected ? 'Viso Rilevato ✓' : 'Tocca per Scattare'}
+                            </span>
+                            {isFallbackActive && (
+                              <span className="text-[8px] text-orange-400 flex items-center justify-center gap-1 mt-1">
+                                <ShieldAlert size={10} /> Qualità bassa
+                              </span>
+                            )}
+                        </div>
+
+                        {faceError && (
+                          <div className="mt-4 p-2 bg-red-500/10 border border-red-500/30 rounded-lg w-full">
+                            <p className="text-[9px] text-red-400 text-center font-bold">{faceError}</p>
+                          </div>
+                        )}
+                        
+                        <p className="mt-4 text-[9px] text-white text-center leading-tight">
+                            Carica un primo piano chiaro e ben illuminato.<br/>Fallo bene una volta per tutti i tuoi film.
+                        </p>
                     </div>
                   </div>
                 </div>

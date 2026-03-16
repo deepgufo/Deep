@@ -459,7 +459,13 @@ export default function CreaPage() {
 
       setIsGenerating(true);
 
-      const targetVideoUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/video-clips/${selectedChar!.video_url}`;
+      // LOGICA 50/50: Scelta tra video.mp4 e video_02.mp4
+      const useSecondClip = Math.random() > 0.5;
+      const finalVideoPath = useSecondClip 
+        ? selectedChar!.video_url.replace('video.mp4', 'video_02.mp4') 
+        : selectedChar!.video_url;
+
+      const targetVideoUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/video-clips/${finalVideoPath}`;
 
       const response = await fetch("/api/face-swap", {
         method: "POST",
