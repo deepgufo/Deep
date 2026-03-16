@@ -176,7 +176,7 @@ export default function CompletamentoProfiloPage() {
       // ------------------------------------------
 
       setLoadingMessage('✅ Successo! Preparazione set...');
-      setTimeout(() => router.push('/profilo'), 1000);
+      setTimeout(() => router.push('/crea'), 1000);
       
     } catch (err: any) {
       console.error("Errore salvataggio:", err);
