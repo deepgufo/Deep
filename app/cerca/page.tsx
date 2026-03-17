@@ -19,6 +19,9 @@ export default function CercaPage() {
   const [searchResults, setSearchResults] = useState<UserSearchResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  
+  // STATO PER I PROFILI PRE-IMPOSTATI
+  const [featuredUsers, setFeaturedUsers] = useState<UserSearchResult[]>([]);
 
   // --- CARICA ID UTENTE LOGGATO ---
   useEffect(() => {
@@ -31,6 +34,36 @@ export default function CercaPage() {
     };
     
     loadCurrentUser();
+  }, []);
+
+  // --- CARICA I PROFILI PRE-IMPOSTATI (TALENTI) ---
+  useEffect(() => {
+    const loadFeaturedUsers = async () => {
+      const PRESET_IDS = [
+        '5160a18d-603d-4fb1-a030-6120c39245e0',
+        '645c8d5c-a793-40d4-a626-fbaf68f449a0',
+        '773d1c57-2c33-4d34-9d45-afb7d3a0102a',
+        'cab570df-9850-4c16-909a-90a8e6951c7b',
+        '45010289-4a12-4dab-8053-bf7e4cff7dd7',
+        '0bc136b1-2266-4efe-82a4-b6b046765eaf',
+        'ed12da24-1fa1-4957-9ece-1202956a4364'
+      ];
+
+      try {
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('id, username, full_name, avatar_url')
+          .in('id', PRESET_IDS);
+
+        if (!error && data) {
+          setFeaturedUsers(data);
+        }
+      } catch (err) {
+        console.error('Errore caricamento talenti:', err);
+      }
+    };
+
+    loadFeaturedUsers();
   }, []);
 
   useEffect(() => {
@@ -172,7 +205,40 @@ export default function CercaPage() {
               </div>
             )}
 
-            {searchQuery.trim() === '' && (
+            {/* SEZIONE TALENTI SUGGERITI: VISIBILE SOLO SE LA RICERCA È VUOTA */}
+            {searchQuery.trim() === '' && featuredUsers.length > 0 && (
+              <div className="space-y-2 py-2">
+                <p className="text-zinc-500 text-[10px] font-black uppercase tracking-[0.2em] mb-4 pl-1">Talenti suggeriti</p>
+                {featuredUsers.map((user) => (
+                  <button
+                    key={user.id}
+                    onClick={() => handleUserClick(user.id)}
+                    className="w-full flex items-center gap-4 p-4 rounded-2xl bg-zinc-900/30 border border-zinc-900 hover:border-yellow-400/50 hover:bg-zinc-900 transition-all text-left group"
+                  >
+                    <div className="relative w-14 h-14 rounded-full overflow-hidden border-2 border-zinc-800 flex-shrink-0 group-hover:border-yellow-400 transition-colors">
+                      {user.avatar_url ? (
+                        <Image src={user.avatar_url} alt={user.full_name} fill className="object-cover" />
+                      ) : (
+                        <div className="w-full h-full bg-zinc-800 flex items-center justify-center">
+                          <UserIcon className="w-7 h-7 text-zinc-600" />
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="flex-1 min-w-0">
+                      <p className="text-white font-bold text-base truncate uppercase tracking-tighter">
+                        {user.full_name}
+                      </p>
+                      <p className="text-yellow-400/60 text-xs font-mono truncate">
+                        @{user.username}
+                      </p>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {searchQuery.trim() === '' && featuredUsers.length === 0 && (
               <div className="flex flex-col items-center justify-center py-20 opacity-20">
                 <Search className="w-20 h-20 text-white mb-4" />
                 <p className="text-white text-xs font-black uppercase tracking-[0.3em]">

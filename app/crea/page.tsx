@@ -518,14 +518,14 @@ export default function CreaPage() {
 
   return (
     <PageBackground>
-      <div className={`h-[100dvh] w-full bg-[#0A0A0A] text-white font-sans overflow-hidden flex flex-col px-4 pt-10 pb-6 relative transition-all duration-500 ${(showInvitePopup || showFacePopup) ? 'blur-xl scale-[0.95]' : ''}`}>
+      <div className={`h-[100dvh] w-full bg-[#0A0A0A] text-white font-sans overflow-hidden flex flex-col px-4 pt-6 pb-8 relative transition-all duration-500 ${(showInvitePopup || showFacePopup) ? 'blur-xl scale-[0.95]' : ''}`}>
         
         <div className="absolute top-[-10%] left-[-10%] w-[50vw] h-[50vw] bg-[#2A0845] opacity-20 rounded-full blur-[100px] pointer-events-none" />
         <div className="absolute bottom-[10%] right-[-10%] w-[60vw] h-[60vw] bg-[#001B3A] opacity-30 rounded-full blur-[120px] pointer-events-none" />
 
         <div className="relative z-10 w-full max-md mx-auto h-full flex flex-col justify-between">
           
-          <div className="flex-shrink-0 animate-fadeIn relative flex justify-between items-center mb-4">
+          <div className="flex-shrink-0 animate-fadeIn relative flex justify-between items-center mb-3">
             
             <button
               onClick={toggleCoupleMode}
@@ -549,7 +549,7 @@ export default function CreaPage() {
             </div>
           </div>
 
-          <div className="text-center animate-fadeIn mb-4">
+          <div className="text-center animate-fadeIn mb-3">
             <h1 className="text-[26px] sm:text-[28px] font-extrabold text-[#FFFFFF] tracking-tight leading-tight">
               Trasforma il tuo POV<br/>in Cinema
             </h1>
@@ -579,7 +579,7 @@ export default function CreaPage() {
             {isCoupleMode && null}
           </div>
 
-          <div className="flex-1 flex flex-col justify-center animate-fadeIn delay-300 mt-4 mb-4">
+          <div className="flex-1 flex flex-col justify-center animate-fadeIn delay-300 mt-2 mb-6">
             {!isCoupleMode ? (
               <>
                 <p className="text-[11px] font-bold text-zinc-500 uppercase tracking-widest mb-2 pl-1">POV di esempio:</p>
@@ -617,9 +617,9 @@ export default function CreaPage() {
             )}
           </div>
 
-          <div className="flex-shrink-0 flex flex-col items-center pb-8 pt-0 relative z-20 gap-3">
+          <div className="flex-shrink-0 flex flex-col items-center pb-12 pt-0 relative z-20 gap-3">
             
-            <div className="absolute bottom-[130px] w-full flex flex-col items-center gap-2 pointer-events-none z-30">
+            <div className="absolute bottom-[150px] w-full flex flex-col items-center gap-2 pointer-events-none z-30">
               {isLimitError && (
                 <div className="bg-red-500/10 border border-red-500/20 text-red-500 px-4 py-2 rounded-xl text-xs font-bold animate-fadeIn">
                   🚫 Limite giornaliero raggiunto (3/3)
@@ -707,8 +707,11 @@ export default function CreaPage() {
             <p className="text-sm text-white text-center mb-4 leading-relaxed font-medium">
               Carica il tuo volto ora. Sarà il tuo pass universale per ogni POV della scuola. Fallo bene una volta.
             </p>
-            <p className="text-[11px] text-zinc-400 text-center mb-6 leading-relaxed bg-white/5 p-3 rounded-xl border border-white/10">
+            <p className="text-[11px] text-zinc-400 text-center mb-4 leading-relaxed bg-white/5 p-3 rounded-xl border border-white/10">
               💡 <span className="font-bold text-yellow-400">Regola d'oro:</span> Una foto chiara, da solo e ben illuminata garantisce un Face-Swap da paura. Niente occhiali, niente distrazioni.
+            </p>
+            <p className="text-[11px] text-red-500 font-bold text-center mb-6 px-2">
+              La tua faccia è al sicuro. Usiamo la Foto AI solo per creare il tuo video.
             </p>
 
             <div className="w-full flex flex-col items-center mb-6">

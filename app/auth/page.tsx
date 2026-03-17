@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
-import { Mail, ArrowRight, CheckCircle2, Loader2 } from 'lucide-react';
+import { Mail, ArrowRight, CheckCircle2, Loader2, ShieldAlert } from 'lucide-react';
 import Link from 'next/link';
 
 type ViewMode = 'initial' | 'login' | 'signup';
@@ -372,6 +372,14 @@ export default function AuthPage() {
             <div className="text-center mb-8">
               <h2 className="text-2xl font-bold text-white mb-2">Registrati</h2>
               <p className="text-gray-400">Crea il tuo account</p>
+            </div>
+
+            {/* MESSAGGIO SICUREZZA DATI */}
+            <div className="mb-6 p-4 bg-green-500/10 border border-green-500/30 rounded-xl flex items-start gap-3">
+              <ShieldAlert className="w-5 h-5 text-green-400 flex-shrink-0 mt-0.5" />
+              <p className="text-[11px] text-green-200 font-medium leading-relaxed text-left">
+                <strong className="text-green-400">Niente panico per i dati.</strong> Quello che carichi resta affare tuo. Non vendiamo i tuoi dati, non salviamo le tue foto e non inviamo spam. Solo puro divertimento con l'IA.
+              </p>
             </div>
 
             <form onSubmit={handleSignUp} className="space-y-5">
