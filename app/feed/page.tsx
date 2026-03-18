@@ -15,7 +15,8 @@ import {
   X,
   CheckCircle2,
   Trophy,
-  Star
+  Star,
+  Film as FilmIcon
 } from 'lucide-react';
 import Image from 'next/image';
 import PWAInstallPrompt from '../components/PWAInstallPrompt';
@@ -60,6 +61,7 @@ export default function FeedPage() {
   const [confettiActive, setConfettiActive] = useState<string | null>(null);
   const [bigTrophyActive, setBigTrophyActive] = useState<string | null>(null); // Nuovo stato per l'animazione centrale
   const [expandedPosts, setExpandedPosts] = useState<Set<string>>(new Set());
+  const [showAuthModal, setShowAuthModal] = useState(false); // Nuovo stato per finestra registrazione
 
   // Stati Segnalazione
   const [reportingPostId, setReportingPostId] = useState<string | null>(null);
@@ -288,8 +290,7 @@ export default function FeedPage() {
   // --- GESTIONE LIKE/OSCAR ---
   const handleLikeToggle = async (postId: string) => {
     if (!currentUserId) {
-      alert('Devi effettuare il login per mettere like!');
-      router.push('/auth');
+      setShowAuthModal(true);
       return;
     }
 
@@ -348,8 +349,7 @@ export default function FeedPage() {
   // --- GESTIONE SEGNALAZIONE ---
   const handleReportSubmit = async () => {
     if (!currentUserId) {
-      alert('Devi effettuare il login per segnalare un video');
-      router.push('/auth');
+      setShowAuthModal(true);
       return;
     }
 
@@ -401,8 +401,12 @@ export default function FeedPage() {
         handleLikeToggle(postId);
       } else {
         // Mostriamo comunque l'animazione gratificante se lo aveva già messo
-        setBigTrophyActive(postId);
-        setTimeout(() => setBigTrophyActive(null), 1500);
+        if (currentUserId) {
+          setBigTrophyActive(postId);
+          setTimeout(() => setBigTrophyActive(null), 1500);
+        } else {
+          setShowAuthModal(true);
+        }
       }
     } else {
       // È un CLICK SINGOLO (Play/Pause)
@@ -813,6 +817,48 @@ export default function FeedPage() {
                 {isReporting ? <Loader2 className="w-5 h-5 animate-spin" /> : 'CONFERMA SEGNALAZIONE'}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODALE: REGISTRAZIONE (FLASH AUTH) */}
+      {showAuthModal && (
+        <div className="fixed inset-0 z-[5000] flex items-center justify-center p-6 animate-fadeIn">
+          <div className="absolute inset-0 bg-black/85 backdrop-blur-md" onClick={() => setShowAuthModal(false)} />
+          
+          <div className="relative w-full max-w-sm bg-zinc-950 border border-zinc-800 rounded-[32px] overflow-hidden shadow-2xl p-8 flex flex-col items-center text-center">
+            <button 
+              onClick={() => setShowAuthModal(false)}
+              className="absolute top-5 right-5 text-zinc-500 hover:text-white transition-colors"
+            >
+              <X className="w-6 h-6" />
+            </button>
+
+            <div className="w-16 h-16 bg-[#FFCC00]/10 rounded-full flex items-center justify-center mb-6">
+              <FilmIcon className="w-8 h-8 text-[#FFCC00]" />
+            </div>
+
+            <h3 className="text-xl font-black text-white mb-3 uppercase tracking-tighter italic">
+              Non restare a guardare! 🎬
+            </h3>
+            
+            <p className="text-zinc-400 text-sm font-medium leading-relaxed mb-8">
+              Per mettere like, commentare e creare i tuoi film AI devi far parte della scuola. Ci metti 10 secondi, promesso.
+            </p>
+
+            <button
+              onClick={() => router.push('/auth')}
+              className="w-full py-5 bg-[#FFCC00] text-black font-black rounded-2xl active:scale-95 transition-all shadow-[0_0_30px_rgba(255,204,0,0.2)] uppercase tracking-widest text-sm"
+            >
+              REGISTRATI ORA
+            </button>
+
+            <button 
+              onClick={() => setShowAuthModal(false)}
+              className="mt-6 text-[10px] font-bold text-zinc-600 uppercase tracking-widest hover:text-zinc-400 transition-colors"
+            >
+              Continua a guardare
+            </button>
           </div>
         </div>
       )}

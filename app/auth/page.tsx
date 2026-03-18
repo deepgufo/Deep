@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
-import { Mail, ArrowRight, CheckCircle2, Loader2, ShieldAlert } from 'lucide-react';
+import { Mail, ArrowRight, CheckCircle2, Loader2, ShieldAlert, ChevronLeft } from 'lucide-react';
 import Link from 'next/link';
 
 type ViewMode = 'initial' | 'login' | 'signup';
@@ -259,8 +259,37 @@ export default function AuthPage() {
     }
   };
 
+  // Funzione per gestire il tasto indietro (Hard Redirect infallibile)
+  const handleBackClick = () => {
+    if (viewMode === 'initial') {
+      const ref = document.referrer;
+      
+      // Controllo se c'è un referrer valido interno al nostro sito e che non sia Auth stessa
+      if (ref && ref.includes(window.location.host) && !ref.includes('/auth')) {
+        // Forza fisicamente il caricamento della pagina da cui l'utente proviene
+        window.location.href = ref;
+      } else {
+        // Se non sappiamo da dove viene (link diretto o bug del browser), lo mandiamo in sicurezza al feed
+        window.location.href = '/feed';
+      }
+    } else {
+      // Se l'utente sta digitando login/registrazione, la freccia lo riporta alla schermata di scelta
+      setViewMode('initial');
+      setError('');
+    }
+  };
+
   return (
     <main className="min-h-screen flex items-center justify-center relative overflow-hidden bg-black">
+      
+      {/* FRECCIA INDIETRO ORO - COMPORTAMENTO DINAMICO (FORZA REFRESH NATIVO) */}
+      <button 
+        onClick={handleBackClick}
+        className="absolute top-6 left-6 z-[100] text-[#D4AF37] hover:scale-110 active:scale-90 transition-all p-2"
+      >
+        <ChevronLeft className="w-8 h-8" />
+      </button>
+
       <div className="absolute inset-0 bg-black">
         <div 
           className="absolute inset-0 opacity-80"
@@ -302,13 +331,6 @@ export default function AuthPage() {
 
         {viewMode === 'login' && (
           <div className="animate-fadeIn">
-            <button
-              onClick={() => setViewMode('initial')}
-              className="text-gray-400 hover:text-white mb-6 flex items-center gap-2"
-            >
-              ← Indietro
-            </button>
-
             <div className="text-center mb-8">
               <h2 className="text-2xl font-bold text-white mb-2">Accedi</h2>
               <p className="text-gray-400">Bentornato!</p>
@@ -362,13 +384,6 @@ export default function AuthPage() {
         {viewMode === 'signup' && (
           /* MODIFICA: Aggiunto scroll solo per la vista Registrati */
           <div className="animate-fadeIn max-h-[80dvh] overflow-y-auto pr-1 custom-scrollbar pb-10">
-            <button
-              onClick={() => setViewMode('initial')}
-              className="text-gray-400 hover:text-white mb-6 flex items-center gap-2"
-            >
-              ← Indietro
-            </button>
-
             <div className="text-center mb-8">
               <h2 className="text-2xl font-bold text-white mb-2">Registrati</h2>
               <p className="text-gray-400">Crea il tuo account</p>

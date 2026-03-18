@@ -16,6 +16,13 @@ type Personaggio = {
   video_url: string;
 };
 
+// --- NUOVI TIPI ---
+type Maschera = {
+  id: number;
+  name: string;
+  image_url: string;
+};
+
 const SINGLE_SUGGESTIONS = [
   { id: 1, text: 'POV: Hai preso 3 alla verifica ma sai già che il tuo video farà più visualizzazioni dello stipendio del prof', emoji: '📉' },
   { id: 2, text: 'POV: La campanella suona e tu scappi via dall\'aula come se avessi appena rapinato una banca', emoji: '🏃‍♂️' },
@@ -75,6 +82,13 @@ export default function CreaPage() {
   const [faceError, setFaceError] = useState('');
   const [isFaceDetected, setIsFaceDetected] = useState(false);
   const [isFallbackActive, setIsFallbackActive] = useState(false);
+
+  // --- NUOVI STATI MASCHERE ---
+  const [maschere, setMaschere] = useState<Maschera[]>([]);
+  const [isMaschereLoading, setIsMaschereLoading] = useState(true);
+
+  // --- STATO POP-UP REGISTRAZIONE ---
+  const [showAuthModal, setShowAuthModal] = useState(false);
 
   const currentSuggestions = useMemo(() => {
     return isCoupleMode ? COUPLE_SUGGESTIONS : SINGLE_SUGGESTIONS;
@@ -147,6 +161,16 @@ export default function CreaPage() {
     checkAuthAndLimits();
   }, [router]);
 
+  // --- EFFETTO DELAY PER POP-UP REGISTRAZIONE ---
+  useEffect(() => {
+    if (!isSystemChecking && !isLoggedIn) {
+      const timer = setTimeout(() => {
+        setShowAuthModal(true);
+      }, 6000); // 6 secondi di delay
+      return () => clearTimeout(timer);
+    }
+  }, [isSystemChecking, isLoggedIn]);
+
   useEffect(() => {
     if (!isGenerating) return;
     const interval = setInterval(() => {
@@ -154,6 +178,29 @@ export default function CreaPage() {
     }, 800);
     return () => clearInterval(interval);
   }, [isGenerating]);
+
+  // --- NUOVO EFFETTO FETCH MASCHERE ---
+  useEffect(() => {
+    if (!showFacePopup) return;
+    const fetchMaschere = async () => {
+      setIsMaschereLoading(true);
+      try {
+        const { data, error } = await supabase
+          .from('maschere')
+          .select('*')
+          .eq('is_active', true)
+          .order('id', { ascending: true })
+          .limit(9); // Griglia 3x3 potenziale
+        if (error) throw error;
+        setMaschere(data || []);
+      } catch (err) {
+        console.error("Errore fetch maschere:", err);
+      } finally {
+        setIsMaschereLoading(false);
+      }
+    };
+    fetchMaschere();
+  }, [showFacePopup]);
 
   const handlePromptChange = (val: string) => {
       setPrompt(val);
@@ -409,14 +456,26 @@ export default function CreaPage() {
     }
   };
 
+  // --- NUOVA LOGICA SELEZIONE MASCHERA ---
+  const handleMaskSelection = (maskUrl: string) => {
+    setShowFacePopup(false);
+    handleGenerateFilmWithFace(maskUrl);
+  };
+
   // Logica spezzata per permettere al popup di passare l'URL fresco
   const handleGenerateFilm = async () => {
+    // 1. Permettiamo a TUTTI di scegliere il personaggio (anche non loggati)
+    if (!selectedChar) {
+        goToSelection();
+        return;
+    }
+
     const { data: { session } } = await supabase.auth.getSession();
     const { data: { user } } = await supabase.auth.getUser();
 
+    // MODIFICA: Ora apre il grande modale di registrazione invece del piccolo prompt
     if (!isLoggedIn || !session || !user) {
-      setShowAuthPrompt(true);
-      setTimeout(() => setShowAuthPrompt(false), 4000);
+      setShowAuthModal(true);
       return;
     }
 
@@ -433,11 +492,6 @@ export default function CreaPage() {
     if (isCoupleMode && !coupleName.trim()) {
       alert('Inserisci il nome del tuo complice! 👥');
       return;
-    }
-
-    if (!selectedChar) {
-        goToSelection();
-        return;
     }
 
     // IL BIVIO JUST-IN-TIME
@@ -459,8 +513,8 @@ export default function CreaPage() {
 
       setIsGenerating(true);
 
-      // LOGICA 50/50: Scelta tra video.mp4 e video_02.mp4
-      const useSecondClip = Math.random() > 0.5;
+      // LOGICA 70/30: Scelta 30% video.mp4 e 70% video_02.mp4
+      const useSecondClip = Math.random() < 0.7;
       const finalVideoPath = useSecondClip 
         ? selectedChar!.video_url.replace('video.mp4', 'video_02.mp4') 
         : selectedChar!.video_url;
@@ -510,6 +564,17 @@ export default function CreaPage() {
     if (!isCoupleMode) setCoupleName('');
   };
 
+  // --- NUOVA LOGICA CHIUSURA POPUP FACCIA ---
+  const closeFacePopup = () => {
+    setShowFacePopup(false);
+    setIsGenerating(false);
+    // Resettiamo lo stato biometrico se chiudono il popup a metà
+    setIaFacePreview(null);
+    setSelectedIaFaceFile(null);
+    setFaceError('');
+    setIsFaceDetected(false);
+  };
+
   const isPromptReady = prompt.length >= 10;
 
   if (isSystemChecking) {
@@ -518,7 +583,7 @@ export default function CreaPage() {
 
   return (
     <PageBackground>
-      <div className={`h-[100dvh] w-full bg-[#0A0A0A] text-white font-sans overflow-hidden flex flex-col px-4 pt-6 pb-8 relative transition-all duration-500 ${(showInvitePopup || showFacePopup) ? 'blur-xl scale-[0.95]' : ''}`}>
+      <div className={`h-[100dvh] w-full bg-[#0A0A0A] text-white font-sans overflow-hidden flex flex-col px-4 pt-6 pb-8 relative transition-all duration-500 ${(showInvitePopup || showFacePopup || showAuthModal) ? 'blur-xl scale-[0.95]' : ''}`}>
         
         <div className="absolute top-[-10%] left-[-10%] w-[50vw] h-[50vw] bg-[#2A0845] opacity-20 rounded-full blur-[100px] pointer-events-none" />
         <div className="absolute bottom-[10%] right-[-10%] w-[60vw] h-[60vw] bg-[#001B3A] opacity-30 rounded-full blur-[120px] pointer-events-none" />
@@ -683,64 +748,163 @@ export default function CreaPage() {
         </div>
       </div>
 
-      {/* POP-UP IDENTITA IA (PRIMO VIDEO) */}
+      {/* POP-UP IDENTITA IA (PRIMO VIDEO) - NUOVA STRUTTURA A BIVIO */}
       {showFacePopup && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/80 backdrop-blur-md" />
+          <div className="absolute inset-0 bg-black/80 backdrop-blur-md" onClick={closeFacePopup} />
           
-          <div className="relative w-full max-w-[340px] bg-[#0A0A0A] border border-white/10 rounded-[32px] p-6 shadow-2xl animate-slideUp flex flex-col items-center">
+          <div className="relative w-full max-w-[360px] bg-[#0A0A0A] border border-white/10 rounded-[32px] p-6 shadow-2xl animate-slideUp flex flex-col items-center max-h-[90dvh] overflow-y-auto custom-scrollbar">
             
             <button 
-              onClick={() => {
-                setShowFacePopup(false);
-                setIsGenerating(false);
-              }}
-              className="absolute top-4 right-4 text-zinc-500 hover:text-white"
+              onClick={closeFacePopup}
+              className="absolute top-4 right-4 text-zinc-500 hover:text-white z-10"
             >
               <X className="w-5 h-5" />
             </button>
 
-            <div className="w-12 h-12 bg-purple-500/20 rounded-full flex items-center justify-center mb-4 mt-2">
-              <Sparkles className="w-6 h-6 text-purple-400" />
-            </div>
-
-            <p className="text-sm text-white text-center mb-4 leading-relaxed font-medium">
-              Carica il tuo volto ora. Sarà il tuo pass universale per ogni POV della scuola. Fallo bene una volta.
-            </p>
-            <p className="text-[11px] text-zinc-400 text-center mb-4 leading-relaxed bg-white/5 p-3 rounded-xl border border-white/10">
-              💡 <span className="font-bold text-yellow-400">Regola d'oro:</span> Una foto chiara, da solo e ben illuminata garantisce un Face-Swap da paura. Niente occhiali, niente distrazioni.
-            </p>
-            <p className="text-[11px] text-red-500 font-bold text-center mb-6 px-2">
-              La tua faccia è al sicuro. Usiamo la Foto AI solo per creare il tuo video.
-            </p>
-
-            <div className="w-full flex flex-col items-center mb-6">
-              <div className="relative mb-2">
-                <div className={`absolute -inset-2 border-2 rounded-xl pointer-events-none transition-all duration-500 ${
-                  isFaceDetected 
-                    ? 'border-green-500 shadow-[0_0_15px_rgba(34,197,94,0.4)]' 
-                    : 'border-purple-400/30'
-                }`} />
-                
-                <button
-                  type="button"
-                  onClick={handleIaFaceClick}
-                  className="relative w-20 h-28 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center group overflow-hidden"
-                >
-                  {iaFacePreview ? (
-                    <img 
-                      src={iaFacePreview} 
-                      alt="IA Face preview" 
-                      className="w-full h-full object-cover"
-                    />
-                  ) : (
-                    <div className="flex flex-col items-center justify-center">
-                      <Camera className="w-6 h-6 text-purple-400/50 group-hover:text-purple-400 transition-colors" />
+            {/* SEZIONE 1: SCELTA INIZIALE O BIOMETRIA */}
+            {!selectedIaFaceFile ? (
+                // --- SCENARIO A: BIVIO DI SCELTA ---
+                <div className="w-full flex flex-col items-center animate-fadeIn">
+                    <div className="w-12 h-12 bg-purple-500/20 rounded-full flex items-center justify-center mb-3 mt-4">
+                        <User className="w-6 h-6 text-purple-400" />
                     </div>
-                  )}
-                </button>
-              </div>
-              
+
+                    <h3 className="text-xl font-extrabold text-white mb-6 uppercase tracking-tight">Scegli il Protagonista</h3>
+
+                    {/* PRIMO BOTTONE: CARICA LA TUA FACCIA (COMPATTO E VIOLA) */}
+                    <button
+                        type="button"
+                        onClick={handleIaFaceClick}
+                        className="w-full py-4 mb-8 rounded-2xl bg-purple-600/20 border border-purple-500/50 hover:bg-purple-600/40 hover:border-purple-500 flex flex-col items-center justify-center gap-1 transition-all duration-300 active:scale-95"
+                    >
+                        <span className="text-sm font-black text-purple-400 uppercase tracking-widest">Usa la tua faccia</span>
+                    </button>
+
+                    {/* SEPARATORE */}
+                    <div className="w-full flex items-center gap-3 mb-6">
+                        <div className="flex-1 h-px bg-white/10" />
+                        <span className="text-[10px] font-bold text-zinc-600 uppercase tracking-widest whitespace-nowrap">oppure scegli una maschera</span>
+                        <div className="flex-1 h-px bg-white/10" />
+                    </div>
+
+                    {/* GRIGLIA MASCHERE PREPARATE (3 COLONNE) */}
+                    {isMaschereLoading ? (
+                        <div className="flex items-center justify-center h-48 w-full">
+                            <Loader2 className="w-6 h-6 text-zinc-600 animate-spin" />
+                        </div>
+                    ) : (
+                        <div className="grid grid-cols-3 gap-3 w-full mb-2">
+                            {maschere.map((mask) => (
+                                <button
+                                    key={mask.id}
+                                    onClick={() => handleMaskSelection(mask.image_url)}
+                                    className="relative aspect-[3/4] rounded-xl border border-white/10 overflow-hidden hover:border-[#FFCC00]/50 transition-colors group"
+                                >
+                                    <img 
+                                        src={mask.image_url} 
+                                        alt={mask.name} 
+                                        className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300"
+                                    />
+                                    <div className="absolute inset-x-0 bottom-0 h-1/2 bg-gradient-to-t from-black/80 to-transparent" />
+                                    <span className="absolute bottom-2 left-2 right-2 text-[9px] font-bold text-white truncate text-left leading-tight">{mask.name}</span>
+                                </button>
+                            ))}
+                        </div>
+                    )}
+                    {maschere.length === 0 && !isMaschereLoading && (
+                        <p className="text-[10px] text-zinc-600 py-6">Nessuna maschera disponibile.</p>
+                    )}
+                </div>
+            ) : (
+                // --- SCENARIO B: LOGICA BIOMETRICA ESISTENTE (DOPO SCATTO) ---
+                <div className="w-full flex flex-col items-center animate-fadeIn">
+                    <div className="w-12 h-12 bg-purple-500/20 rounded-full flex items-center justify-center mb-4 mt-2">
+                      <Camera className="w-6 h-6 text-purple-400" />
+                    </div>
+
+                    <p className="text-sm text-white text-center mb-4 leading-relaxed font-medium">
+                      Verifica il selfie. Sarà il tuo pass universale per ogni POV della scuola. Fallo bene una volta.
+                    </p>
+                    <p className="text-[11px] text-zinc-400 text-center mb-4 leading-relaxed bg-white/5 p-3 rounded-xl border border-white/10">
+                      💡 <span className="font-bold text-yellow-400">Regola d'oro:</span> Una foto chiara, da solo e ben illuminata garantisce un Face-Swap da paura. Niente occhiali, niente distrazioni.
+                    </p>
+                    <p className="text-[11px] text-red-500 font-bold text-center mb-6 px-2">
+                      La tua faccia è al sicuro. Usiamo la Foto AI solo per creare il tuo video.
+                    </p>
+
+                    <div className="w-full flex flex-col items-center mb-6">
+                      <div className="relative mb-2">
+                        <div className={`absolute -inset-2 border-2 rounded-xl pointer-events-none transition-all duration-500 ${
+                          isFaceDetected 
+                            ? 'border-green-500 shadow-[0_0_15px_rgba(34,197,94,0.4)]' 
+                            : 'border-purple-400/30'
+                        }`} />
+                        
+                        <button
+                          type="button"
+                          onClick={handleIaFaceClick}
+                          className="relative w-20 h-28 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center group overflow-hidden"
+                        >
+                          {iaFacePreview && (
+                            <img 
+                              src={iaFacePreview} 
+                              alt="IA Face preview" 
+                              className="w-full h-full object-cover"
+                            />
+                          )}
+                        </button>
+                      </div>
+
+                      <div className="flex flex-col items-center gap-0.5">
+                        <span className={`text-[10px] font-bold tracking-wider ${isFaceDetected ? 'text-green-400 animate-pulse' : 'text-zinc-500'}`}>
+                          {isFaceDetected ? 'VISO RILEVATO' : 'ERRORE RILEVAMENTO'}
+                        </span>
+                        {isFallbackActive && (
+                          <span className="text-[8px] text-orange-400 flex items-center gap-1 mt-1">
+                            <ShieldAlert size={10} /> Qualità bassa, ci proviamo
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {faceError && (
+                      <div className="w-full mb-4 p-2 bg-red-500/10 border border-red-500/30 rounded-lg">
+                        <p className="text-[10px] text-red-400 text-center font-bold">
+                          {faceError}
+                        </p>
+                      </div>
+                    )}
+
+                    <div className="w-full flex gap-3 mt-2">
+                        <button
+                            onClick={() => {
+                                setSelectedIaFaceFile(null);
+                                setIaFacePreview(null);
+                                setFaceError('');
+                            }}
+                            className="flex-1 py-4 bg-zinc-800 text-white font-black text-xs uppercase tracking-widest rounded-xl transition-all duration-300 active:scale-95"
+                        >
+                            Riprova
+                        </button>
+                        <button
+                          onClick={handleSaveFaceAndGenerate}
+                          disabled={isFaceLoading || !selectedIaFaceFile || (!isFaceDetected && !isFallbackActive)}
+                          className="flex-[2] py-4 bg-purple-600 text-white font-black text-xs uppercase tracking-widest rounded-xl transition-all duration-300 disabled:opacity-50 disabled:bg-zinc-800 disabled:text-zinc-500 active:scale-95 flex items-center justify-center"
+                        >
+                          {isFaceLoading ? (
+                            <>
+                              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                              {faceLoadingMessage}
+                            </>
+                          ) : (
+                            'Continua'
+                          )}
+                        </button>
+                    </div>
+                </div>
+            )}
+  
               <input
                 ref={iaFaceInputRef}
                 type="file"
@@ -749,41 +913,6 @@ export default function CreaPage() {
                 onChange={handleIaFaceChange}
                 className="hidden"
               />
-
-              <div className="flex flex-col items-center gap-0.5">
-                <span className={`text-[10px] font-bold tracking-wider ${isFaceDetected ? 'text-green-400 animate-pulse' : 'text-zinc-500'}`}>
-                  {isFaceDetected ? 'VISO RILEVATO' : 'TOCCA PER SCATTARE'}
-                </span>
-                {isFallbackActive && (
-                  <span className="text-[8px] text-orange-400 flex items-center gap-1 mt-1">
-                    <ShieldAlert size={10} /> Qualità bassa, ci proviamo
-                  </span>
-                )}
-              </div>
-            </div>
-
-            {faceError && (
-              <div className="w-full mb-4 p-2 bg-red-500/10 border border-red-500/30 rounded-lg">
-                <p className="text-[10px] text-red-400 text-center font-bold">
-                  {faceError}
-                </p>
-              </div>
-            )}
-
-            <button
-              onClick={handleSaveFaceAndGenerate}
-              disabled={isFaceLoading || !selectedIaFaceFile}
-              className="w-full py-4 bg-purple-600 text-white font-black text-xs uppercase tracking-widest rounded-xl transition-all duration-300 disabled:opacity-50 disabled:bg-zinc-800 disabled:text-zinc-500 active:scale-95 flex items-center justify-center"
-            >
-              {isFaceLoading ? (
-                <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  {faceLoadingMessage}
-                </>
-              ) : (
-                'Continua'
-              )}
-            </button>
 
           </div>
         </div>
@@ -831,6 +960,48 @@ export default function CreaPage() {
         </div>
       )}
 
+      {/* MODALE: REGISTRAZIONE (FLASH AUTH - DELAY 6 SECONDI O TENTATIVO CREAZIONE) */}
+      {showAuthModal && (
+        <div className="fixed inset-0 z-[5000] flex items-center justify-center p-6 animate-fadeIn">
+          <div className="absolute inset-0 bg-black/85 backdrop-blur-md" onClick={() => setShowAuthModal(false)} />
+          
+          <div className="relative w-full max-w-sm bg-zinc-950 border border-zinc-800 rounded-[32px] overflow-hidden shadow-2xl p-8 flex flex-col items-center text-center">
+            <button 
+              onClick={() => setShowAuthModal(false)}
+              className="absolute top-5 right-5 text-zinc-500 hover:text-white transition-colors"
+            >
+              <X className="w-6 h-6" />
+            </button>
+
+            <div className="w-16 h-16 bg-[#FFCC00]/10 rounded-full flex items-center justify-center mb-6">
+              <Film className="w-8 h-8 text-[#FFCC00]" />
+            </div>
+
+            <h3 className="text-xl font-black text-white mb-3 uppercase tracking-tighter italic">
+              Il regista sei tu! 🎬
+            </h3>
+            
+            <p className="text-zinc-400 text-sm font-medium leading-relaxed mb-8">
+              Per dare vita alla tua prima hit AI e sbloccare tutte le maschere leggendarie, devi registrarti. Ci metti meno di un intervallo!
+            </p>
+
+            <button
+              onClick={() => router.push('/auth')}
+              className="w-full py-5 bg-[#FFCC00] text-black font-black rounded-2xl active:scale-95 transition-all shadow-[0_0_30px_rgba(255,204,0,0.2)] uppercase tracking-widest text-sm"
+            >
+              SBLOCCA LA CREAZIONE
+            </button>
+
+            <button 
+              onClick={() => setShowAuthModal(false)}
+              className="mt-6 text-[10px] font-bold text-zinc-600 uppercase tracking-widest hover:text-zinc-400 transition-colors"
+            >
+              Continua a esplorare
+            </button>
+          </div>
+        </div>
+      )}
+
       <style jsx global>{`
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
         
@@ -861,6 +1032,30 @@ export default function CreaPage() {
         }
         .animate-pulse-glow {
           animation: pulse-glow 2s infinite ease-in-out;
+        }
+
+        /* NUOVA ANIMAZIONE PULSAZIONE LENTA BORDORATO */
+        @keyframes pulse-glow-slow {
+          0%, 100% { box-shadow: 0 0 15px rgba(255,204,0,0.15); border-color: rgba(255,204,0,0.8); }
+          50% { box-shadow: 0 0 25px rgba(255,204,0,0.3); border-color: rgba(255,204,0,1); }
+        }
+        .animate-pulse-glow-slow {
+          animation: pulse-glow-slow 3s infinite ease-in-out;
+        }
+
+        /* STILE SCROLLBAR SOTTILE */
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 255, 255, 0.2);
         }
       `}</style>
     </PageBackground>

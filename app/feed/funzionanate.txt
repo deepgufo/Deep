@@ -14,7 +14,8 @@ import {
   Play,
   X,
   CheckCircle2,
-  Trophy
+  Trophy,
+  Star
 } from 'lucide-react';
 import Image from 'next/image';
 import PWAInstallPrompt from '../components/PWAInstallPrompt';
@@ -51,11 +52,13 @@ export default function FeedPage() {
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   
   const [userSchoolName, setUserSchoolName] = useState<string | null>(null);
+  const [unreadNotifCount, setUnreadNotifCount] = useState(0);
   
   // Stati UI
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [pausedVideos, setPausedVideos] = useState<Set<string>>(new Set());
   const [confettiActive, setConfettiActive] = useState<string | null>(null);
+  const [bigTrophyActive, setBigTrophyActive] = useState<string | null>(null); // Nuovo stato per l'animazione centrale
   const [expandedPosts, setExpandedPosts] = useState<Set<string>>(new Set());
 
   // Stati Segnalazione
@@ -67,6 +70,9 @@ export default function FeedPage() {
   // Refs per video, intersection observer e paginazione
   const videoRefs = useRef<{ [key: string]: HTMLVideoElement | null }>({});
   const observerRef = useRef<IntersectionObserver | null>(null);
+
+  // Ref per il doppio click
+  const lastClickTime = useRef<{ [key: string]: number }>({});
 
   // --- LOGICA TRIGGER PWA DOPO 30 SECONDI ---
   useEffect(() => {
@@ -90,6 +96,17 @@ export default function FeedPage() {
       const userId = session?.user?.id || null;
       setCurrentUserId(userId);
 
+      // Caricamento Badge Notifiche
+      if (userId && isInitial) {
+        const { count } = await supabase
+          .from('notifications')
+          .select('*', { count: 'exact', head: true })
+          .eq('user_id', userId)
+          .eq('is_read', false);
+        
+        setUnreadNotifCount(count || 0);
+      }
+
       // Recupero il school_name dell'utente se non lo abbiamo ancora
       let currentSchool = userSchoolName;
       if (userId && !currentSchool) {
@@ -110,7 +127,7 @@ export default function FeedPage() {
 
       let query;
 
-      // --- LOGICA FEED SCUOLA (DENORMALIZZATA) ---
+      // --- LOGICA FEED SCUOLA E PUBBLICO CON CONTEGGIO LIKES INTEGRATO ---
       if (activeTab === 'school') {
         if (!currentSchool) {
           setPosts([]);
@@ -120,7 +137,6 @@ export default function FeedPage() {
           return;
         }
 
-        // Utilizziamo la colonna school_name direttamente su public_videos
         query = supabase
           .from('public_videos')
           .select(`
@@ -135,14 +151,14 @@ export default function FeedPage() {
               full_name,
               username,
               avatar_url
-            )
+            ),
+            likes (count)
           `)
-          .eq('school_name', currentSchool) // Filtro diretto sulla tabella video
+          .eq('school_name', currentSchool)
           .order('created_at', { ascending: false })
           .range(start, end);
           
       } else {
-        // Query Pubblica (FILM): Intoccata
         query = supabase
           .from('public_videos')
           .select(`
@@ -156,7 +172,8 @@ export default function FeedPage() {
               full_name,
               username,
               avatar_url
-            )
+            ),
+            likes (count)
           `)
           .order('created_at', { ascending: false })
           .range(start, end);
@@ -181,37 +198,41 @@ export default function FeedPage() {
         setHasMore(false);
       }
 
-      const transformedPosts: Post[] = await Promise.all(
-        (videosData || []).map(async (video: any) => {
-          const { count: likesCount } = await supabase
-            .from('likes')
-            .select('*', { count: 'exact', head: true })
-            .eq('film_id', video.id);
+      // Estrai tutti gli ID dei video correnti per fare una singola query dei "miei like"
+      const videoIds = videosData.map(v => v.id);
+      
+      let userLikesSet = new Set<string>();
+      if (userId && videoIds.length > 0) {
+        // Un'unica query per sapere a quali di questi 3 video l'utente ha messo like
+        const { data: userLikesData } = await supabase
+          .from('likes')
+          .select('film_id')
+          .eq('user_id', userId)
+          .in('film_id', videoIds);
 
-          let hasUserLiked = false;
-          if (userId) {
-            const { data: likeData } = await supabase
-              .from('likes')
-              .select('id')
-              .eq('film_id', video.id)
-              .eq('user_id', userId)
-              .maybeSingle();
-            
-            hasUserLiked = !!likeData;
-          }
+        if (userLikesData) {
+          userLikesData.forEach(like => userLikesSet.add(like.film_id));
+        }
+      }
 
-          return {
-            id: video.id,
-            video_url: video.video_url,
-            prompt: video.caption || '',
-            created_at: video.created_at,
-            user_id: video.user_id,
-            profile: video.profiles,
-            likes_count: likesCount || 0,
-            has_user_liked: hasUserLiked
-          };
-        })
-      );
+      const transformedPosts: Post[] = videosData.map((video: any) => {
+        // Gestione corretta della risposta likes(count) di Supabase
+        let likesCount = 0;
+        if (Array.isArray(video.likes) && video.likes.length > 0) {
+            likesCount = video.likes[0].count;
+        }
+
+        return {
+          id: video.id,
+          video_url: video.video_url,
+          prompt: video.caption || '',
+          created_at: video.created_at,
+          user_id: video.user_id,
+          profile: video.profiles,
+          likes_count: likesCount,
+          has_user_liked: userLikesSet.has(video.id)
+        };
+      });
 
       setPosts(prev => isInitial ? transformedPosts : [...prev, ...transformedPosts]);
 
@@ -279,7 +300,11 @@ export default function FeedPage() {
     
     if (!wasLiked) {
       setConfettiActive(postId);
-      setTimeout(() => setConfettiActive(null), 2200);
+      setBigTrophyActive(postId);
+      setTimeout(() => {
+        setConfettiActive(null);
+        setBigTrophyActive(null);
+      }, 1500); // L'animazione centrale sparisce dopo 1.5 secondi
     }
     
     setPosts((prev) =>
@@ -360,25 +385,53 @@ export default function FeedPage() {
     }
   };
 
-  // --- TOGGLE PLAY/PAUSE ---
+  // --- TOGGLE PLAY/PAUSE E DOPPIO CLICK ---
   const handleVideoClick = (postId: string) => {
-    const video = videoRefs.current[postId];
-    if (!video) return;
+    const now = Date.now();
+    const lastClick = lastClickTime.current[postId] || 0;
+    const timeDiff = now - lastClick;
 
-    if (video.paused) {
-      video.play();
-      setPausedVideos((prev) => {
-        const newSet = new Set(prev);
-        newSet.delete(postId);
-        return newSet;
-      });
+    if (timeDiff < 300) {
+      // È un DOPPIO CLICK
+      lastClickTime.current[postId] = 0; // Resetta per evitare falsi positivi successivi
+      
+      // Mettiamo like solo se l'utente non l'ha già messo
+      const post = posts.find((p) => p.id === postId);
+      if (post && !post.has_user_liked) {
+        handleLikeToggle(postId);
+      } else {
+        // Mostriamo comunque l'animazione gratificante se lo aveva già messo
+        setBigTrophyActive(postId);
+        setTimeout(() => setBigTrophyActive(null), 1500);
+      }
     } else {
-      video.pause();
-      setPausedVideos((prev) => {
-        const newSet = new Set(prev);
-        newSet.add(postId);
-        return newSet;
-      });
+      // È un CLICK SINGOLO (Play/Pause)
+      lastClickTime.current[postId] = now;
+      
+      // Ritardo leggermente il play/pause per aspettare e vedere se diventa un doppio click
+      setTimeout(() => {
+        // Se nel frattempo l'ora dell'ultimo click è stata resettata a 0, era un doppio click, quindi ignoriamo il play/pause
+        if (lastClickTime.current[postId] !== now) return;
+
+        const video = videoRefs.current[postId];
+        if (!video) return;
+
+        if (video.paused) {
+          video.play();
+          setPausedVideos((prev) => {
+            const newSet = new Set(prev);
+            newSet.delete(postId);
+            return newSet;
+          });
+        } else {
+          video.pause();
+          setPausedVideos((prev) => {
+            const newSet = new Set(prev);
+            newSet.add(postId);
+            return newSet;
+          });
+        }
+      }, 250); // Attendiamo 250ms per capire le intenzioni
     }
   };
 
@@ -466,46 +519,74 @@ export default function FeedPage() {
         </div>
       )}
 
-      <header className="fixed top-0 left-0 right-0 z-50 bg-black/90 backdrop-blur-xl border-b border-white/5">
-        <div className="max-w-md mx-auto flex items-center justify-center gap-8 px-4 py-2.5">
-          <button
-            onClick={() => setActiveTab('film')}
-            className={`relative pb-1 transition-all duration-300 ${
-              activeTab === 'film'
-                ? 'text-white text-base font-bold'
-                : 'text-zinc-600 text-sm font-semibold'
-            }`}
-          >
-            Film
-            {activeTab === 'film' && (
-              <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-[#D4AF37] rounded-full"></div>
-            )}
-          </button>
+      <header className="fixed top-0 left-0 right-0 z-50 bg-black/90 backdrop-blur-xl border-b border-white/5 h-[56px] flex items-center">
+        <div className="w-full max-w-md mx-auto flex items-center justify-between px-4 relative h-full">
           
-          <button
-            onClick={() => setActiveTab('school')}
-            className={`relative pb-1 transition-all duration-300 uppercase ${
-              activeTab === 'school'
-                ? 'text-white text-base font-bold'
-                : 'text-zinc-600 text-sm font-semibold'
-            }`}
-          >
-            {userSchoolName ? userSchoolName : 'Scuola'}
-            {activeTab === 'school' && (
-              <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-[#D4AF37] rounded-full"></div>
-            )}
-          </button>
+          <div className="flex-1" />
+          
+          <div className="flex gap-8 absolute left-1/2 -translate-x-1/2">
+            <button
+              onClick={() => setActiveTab('film')}
+              className={`relative pb-1 transition-all duration-300 ${
+                activeTab === 'film'
+                  ? 'text-white text-base font-bold'
+                  : 'text-zinc-600 text-sm font-semibold'
+              }`}
+            >
+              Film
+              {activeTab === 'film' && (
+                <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-[#D4AF37] rounded-full"></div>
+              )}
+            </button>
+            
+            <button
+              onClick={() => setActiveTab('school')}
+              className={`relative pb-1 transition-all duration-300 uppercase ${
+                activeTab === 'school'
+                  ? 'text-white text-base font-bold'
+                  : 'text-zinc-600 text-sm font-semibold'
+              }`}
+            >
+              {userSchoolName ? userSchoolName : 'Scuola'}
+              {activeTab === 'school' && (
+                <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-[#D4AF37] rounded-full"></div>
+              )}
+            </button>
+          </div>
+
+          <div className="flex-1 flex justify-end h-full items-center">
+            <button 
+              onClick={() => router.push('/notifiche')}
+              className="relative flex flex-col items-center justify-center gap-0.5 px-2"
+            >
+              <div className="relative">
+                <Star 
+                  className={`w-[22px] h-[22px] drop-shadow-[0_2px_4px_rgba(0,0,0,0.5)] transition-colors ${
+                    unreadNotifCount > 0 ? 'text-[#D4AF37] fill-[#D4AF37]' : 'text-white'
+                  }`} 
+                />
+                {unreadNotifCount > 0 && (
+                  <div className="absolute -top-1.5 -right-2 min-w-[16px] h-[16px] bg-red-600 border border-black rounded-full flex items-center justify-center text-[9px] font-bold text-white px-1 shadow-[0_0_8px_rgba(220,38,38,0.5)]">
+                    {unreadNotifCount > 99 ? '99+' : unreadNotifCount}
+                  </div>
+                )}
+              </div>
+              <span className={`text-[8px] font-semibold drop-shadow-md ${unreadNotifCount > 0 ? 'text-[#D4AF37]' : 'text-white/80'}`}>
+                Notifiche
+              </span>
+            </button>
+          </div>
         </div>
       </header>
 
-      <div className="h-full overflow-y-auto snap-y snap-mandatory pt-[48px] pb-20" style={{ scrollSnapType: 'y mandatory' }}>
+      <div className="h-full overflow-y-auto snap-y snap-mandatory pt-[56px] pb-20" style={{ scrollSnapType: 'y mandatory' }}>
         {posts.length > 0 ? (
           posts.map((post) => (
             <div
               key={post.id}
-              className="h-[calc(100vh-48px)] snap-start flex items-center justify-center"
+              className="h-[calc(100vh-56px)] snap-start flex items-center justify-center"
             >
-              <div className="relative w-full h-[calc(100vh-140px)] max-w-[390px] mx-auto flex flex-col bg-black">
+              <div className="relative w-full h-[calc(100vh-148px)] max-w-[390px] mx-auto flex flex-col bg-black">
                 
                 <div className="h-[70px] bg-black flex items-center justify-between px-4 flex-shrink-0">
                   <button
@@ -593,13 +674,23 @@ export default function FeedPage() {
                     data-id={post.id}
                     src={post.video_url}
                     className="w-full h-full object-cover"
+                    preload="metadata"
                     loop
                     playsInline
                   />
 
-                  {pausedVideos.has(post.id) && (
+                  {/* ANIMAZIONE CENTRALE: BIG TROPHY */}
+                  {bigTrophyActive === post.id && (
+                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-40">
+                      <div className="animate-popTrophy drop-shadow-[0_0_30px_rgba(212,175,55,0.8)]">
+                        <Trophy className="w-32 h-32 text-[#D4AF37] fill-[#D4AF37]" />
+                      </div>
+                    </div>
+                  )}
+
+                  {pausedVideos.has(post.id) && !bigTrophyActive && (
                     <div className="absolute inset-0 flex items-center justify-center z-30 bg-black/20">
-                      <div className="w-16 h-16 flex items-center justify-center rounded-full bg-white/20 backdrop-blur-md">
+                      <div className="w-16 h-16 flex items-center justify-center rounded-full bg-white/20 backdrop-blur-md animate-fadeIn">
                         <Play className="w-8 h-8 text-white fill-white" />
                       </div>
                     </div>
@@ -736,6 +827,17 @@ export default function FeedPage() {
         @keyframes fadeIn {
           from { opacity: 0; transform: translateY(-10px); }
           to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Animazione per il doppio click (Coppa gigante) */
+        @keyframes popTrophy {
+          0% { opacity: 0; transform: scale(0.5) rotate(-15deg); }
+          30% { opacity: 1; transform: scale(1.2) rotate(5deg); }
+          70% { opacity: 1; transform: scale(1) rotate(0deg); }
+          100% { opacity: 0; transform: scale(1.5) translateY(-50px); }
+        }
+        .animate-popTrophy {
+          animation: popTrophy 1.2s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
         }
         
         .confetti {

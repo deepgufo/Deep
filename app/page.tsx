@@ -9,19 +9,12 @@ export default function SplashScreen() {
   const [isAnimating, setIsAnimating] = useState(true);
 
   useEffect(() => {
-    // Gestione del timer estetico unita al controllo della sessione
+    // Gestione del timer estetico puntata direttamente al feed
     const timer = setTimeout(async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      
       setIsAnimating(false);
       
-      // Se l'utente è loggato va alla creazione, altrimenti deve autenticarsi
-      // Modificato: aggiunta segnalazione per nascondere la freccia in auth
-      if (session) {
-        router.push('/crea');
-      } else {
-        router.push('/auth?mode=first_login');
-      }
+      // Reindirizzamento forzato al feed dell'app senza passare da auth
+      router.push('/feed');
     }, 1500); // 1.5 secondi di permanenza
 
     return () => clearTimeout(timer);
