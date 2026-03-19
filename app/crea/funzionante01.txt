@@ -1,10 +1,11 @@
 'use client';
 
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
-import { Sparkles, Film, Users, Zap, User, RefreshCw, ArrowLeft } from 'lucide-react'; 
+import { Sparkles, Film, Users, Zap, User, RefreshCw, ArrowLeft, Camera, ShieldAlert, X, Loader2 } from 'lucide-react'; 
 import PageBackground from '../components/PageBackground';
+import { validateFaceImage } from '@/utils/faceValidation';
 
 // TIPO PERSONAGGIO
 type Personaggio = {
@@ -63,6 +64,17 @@ export default function CreaPage() {
   // NUOVI STATI PER IL PERSONAGGIO E FACCIA
   const [userFace, setUserFace] = useState<string | null>(null);
   const [selectedChar, setSelectedChar] = useState<Personaggio | null>(null);
+
+  // --- STATI E REFS PER IL POPUP FOTO IA ---
+  const [showFacePopup, setShowFacePopup] = useState(false);
+  const iaFaceInputRef = useRef<HTMLInputElement>(null);
+  const [iaFacePreview, setIaFacePreview] = useState<string | null>(null);
+  const [selectedIaFaceFile, setSelectedIaFaceFile] = useState<File | null>(null);
+  const [isFaceLoading, setIsFaceLoading] = useState(false);
+  const [faceLoadingMessage, setFaceLoadingMessage] = useState('');
+  const [faceError, setFaceError] = useState('');
+  const [isFaceDetected, setIsFaceDetected] = useState(false);
+  const [isFallbackActive, setIsFallbackActive] = useState(false);
 
   const currentSuggestions = useMemo(() => {
     return isCoupleMode ? COUPLE_SUGGESTIONS : SINGLE_SUGGESTIONS;
@@ -213,7 +225,191 @@ export default function CreaPage() {
     }
   };
 
-  // --- LOGICA DI GENERAZIONE ---
+  // --- LOGICA FOTO IA (DAL VECCHIO COMPLETAMENTO PROFILO) ---
+  const calculateBrightness = (imageFile: File): Promise<{ brightness: number, img: HTMLImageElement, canvas: HTMLCanvasElement }> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          const ctx = canvas.getContext('2d');
+          
+          if (!ctx) {
+            reject(new Error('Canvas context non disponibile'));
+            return;
+          }
+          
+          const scale = Math.min(400 / img.width, 400 / img.height);
+          canvas.width = img.width * scale;
+          canvas.height = img.height * scale;
+          
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          
+          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          const data = imageData.data;
+          
+          let totalBrightness = 0;
+          for (let i = 0; i < data.length; i += 4) {
+            const r = data[i];
+            const g = data[i + 1];
+            const b = data[i + 2];
+            const brightness = 0.299 * r + 0.587 * g + 0.114 * b;
+            totalBrightness += brightness;
+          }
+          
+          const averageBrightness = totalBrightness / (data.length / 4);
+          resolve({ brightness: averageBrightness, img, canvas });
+        };
+        
+        img.onerror = () => reject(new Error('Errore caricamento immagine'));
+        img.src = e.target?.result as string;
+      };
+      
+      reader.onerror = () => reject(new Error('Errore lettura file'));
+      reader.readAsDataURL(imageFile);
+    });
+  };
+
+  const handleIaFaceClick = () => {
+    iaFaceInputRef.current?.click();
+  };
+
+  const handleIaFaceChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (!file.type.startsWith('image/')) {
+        setFaceError('Seleziona un file immagine');
+        return;
+      }
+      
+      if (file.size > 5 * 1024 * 1024) {
+        setFaceError('L\'immagine deve essere inferiore a 5MB');
+        return;
+      }
+
+      try {
+        setIsFaceLoading(true);
+        setFaceLoadingMessage('Analisi biometrica...');
+        setIsFaceDetected(false);
+        setIsFallbackActive(false);
+
+        const { brightness, img, canvas } = await calculateBrightness(file);
+        
+        if (brightness < 45) {
+          setFaceError('⚠️ Foto troppo scura! Spostati in un punto più illuminato.');
+          setIaFacePreview(null);
+          setSelectedIaFaceFile(null);
+          setIsFaceLoading(false);
+          return; 
+        }
+
+        const validationPromise = validateFaceImage(img, canvas);
+        const timeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('TIMEOUT')), 5000)
+        );
+
+        try {
+          const validation = await Promise.race([validationPromise, timeoutPromise]) as { valid: boolean; error?: string };
+          
+          if (!validation.valid) {
+            setFaceError(`⚠️ ${validation.error}`);
+            setIaFacePreview(null);
+            setSelectedIaFaceFile(null);
+            setIsFaceLoading(false);
+            return;
+          }
+          setIsFaceDetected(true);
+        } catch (err: any) {
+          if (err.message === 'TIMEOUT') {
+            setIsFallbackActive(true);
+            setIsFaceDetected(true);
+          } else {
+            throw err;
+          }
+        }
+        
+        setSelectedIaFaceFile(file);
+        setFaceError('');
+        
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          setIaFacePreview(reader.result as string);
+        };
+        reader.readAsDataURL(file);
+        setIsFaceLoading(false);
+
+        // Tracciamento aggiunto come nel vecchio file
+        try {
+          const { data: { session } } = await supabase.auth.getSession();
+          let funnelSid = localStorage.getItem('funnel_sid');
+          if (funnelSid) {
+            await supabase.from('funnel_events').insert({
+              step_name: 'photo_added',
+              user_id: session?.user?.id || null,
+              session_id: funnelSid
+            });
+          }
+        } catch (e) { }
+        
+      } catch (err) {
+        console.error('Errore validazione:', err);
+        setFaceError('Errore durante l\'analisi. Riprova.');
+        setIsFaceLoading(false);
+      }
+    }
+  };
+
+  const handleSaveFaceAndGenerate = async () => {
+    if (!selectedIaFaceFile) {
+      setFaceError('⚠️ È obbligatorio scattare la foto per procedere.');
+      return; 
+    }
+
+    setIsFaceLoading(true);
+    setFaceLoadingMessage('Salvataggio identità...');
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.user) throw new Error('Errore di sessione');
+
+      const userId = session.user.id;
+      const iaExt = selectedIaFaceFile.name.split('.').pop();
+      const iaFileName = `${userId}/ia-face-${Date.now()}.${iaExt}`;
+      
+      const { error: iaUploadError } = await supabase.storage
+        .from('ia-faces')
+        .upload(iaFileName, selectedIaFaceFile, { cacheControl: '3600', upsert: true });
+
+      if (iaUploadError) throw new Error(`Errore caricamento: ${iaUploadError.message}`);
+      
+      const { data: iaUrlData } = supabase.storage.from('ia-faces').getPublicUrl(iaFileName);
+      const newIaFaceUrl = iaUrlData.publicUrl;
+
+      const { error: profileError } = await supabase
+        .from('profiles')
+        .update({ ia_face_url: newIaFaceUrl })
+        .eq('id', userId);
+
+      if (profileError) throw new Error(`Errore database: ${profileError.message}`);
+
+      // Imposta lo stato per by-passare il controllo
+      setUserFace(newIaFaceUrl);
+      setShowFacePopup(false);
+      setIsFaceLoading(false);
+
+      // Fa partire direttamente la generazione!
+      handleGenerateFilmWithFace(newIaFaceUrl);
+      
+    } catch (err: any) {
+      console.error("Errore salvataggio faccia:", err);
+      setFaceError(err.message || 'Errore imprevisto durante il salvataggio');
+      setIsFaceLoading(false);
+    }
+  };
+
+  // Logica spezzata per permettere al popup di passare l'URL fresco
   const handleGenerateFilm = async () => {
     const { data: { session } } = await supabase.auth.getSession();
     const { data: { user } } = await supabase.auth.getUser();
@@ -224,7 +420,6 @@ export default function CreaPage() {
       return;
     }
 
-    // CONTROLLO LIMITE VIDEO (3/3)
     if (dailyCount >= 3) {
       setShowInvitePopup(true);
       return;
@@ -245,19 +440,26 @@ export default function CreaPage() {
         return;
     }
 
+    // IL BIVIO JUST-IN-TIME
     if (!userFace) {
-        alert("Non hai una foto profilo! Vai a caricarla.");
-        router.push("/completamento-profilo");
+        setShowFacePopup(true);
         return;
     }
 
+    handleGenerateFilmWithFace(userFace);
+  };
+
+  const handleGenerateFilmWithFace = async (faceUrlToUse: string) => {
     try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+
       localStorage.removeItem('pending_production');
       localStorage.removeItem('predictionId');
 
       setIsGenerating(true);
 
-      const targetVideoUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/video-clips/${selectedChar.video_url}`;
+      const targetVideoUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/video-clips/${selectedChar!.video_url}`;
 
       const response = await fetch("/api/face-swap", {
         method: "POST",
@@ -267,9 +469,9 @@ export default function CreaPage() {
         },
         body: JSON.stringify({
           videoUrl: targetVideoUrl,
-          faceUrl: userFace,
+          faceUrl: faceUrlToUse,
           prompt: prompt,
-          userId: user.id
+          userId: session.user.id
         }),
       });
 
@@ -279,7 +481,7 @@ export default function CreaPage() {
       const sessionData = {
         videoUrl: targetVideoUrl,
         initialPrompt: prompt,
-        category: selectedChar.tag.replace('#', ''),
+        category: selectedChar!.tag.replace('#', ''),
         timestamp: Date.now()
       };
       localStorage.setItem('pending_production', JSON.stringify(sessionData));
@@ -287,7 +489,7 @@ export default function CreaPage() {
       localStorage.removeItem("tempPrompt");
       localStorage.setItem("predictionId", data.id);
       
-      router.push(`/finalizzazione?category=${selectedChar.tag.replace('#','')}&prompt=${encodeURIComponent(prompt)}`);
+      router.push(`/finalizzazione?category=${selectedChar!.tag.replace('#','')}&prompt=${encodeURIComponent(prompt)}`);
 
     } catch (error) {
       console.error('❌ Errore:', error);
@@ -310,7 +512,7 @@ export default function CreaPage() {
 
   return (
     <PageBackground>
-      <div className={`h-[100dvh] w-full bg-[#0A0A0A] text-white font-sans overflow-hidden flex flex-col px-4 pt-10 pb-6 relative transition-all duration-500 ${showInvitePopup ? 'blur-xl scale-[0.95]' : ''}`}>
+      <div className={`h-[100dvh] w-full bg-[#0A0A0A] text-white font-sans overflow-hidden flex flex-col px-4 pt-10 pb-6 relative transition-all duration-500 ${(showInvitePopup || showFacePopup) ? 'blur-xl scale-[0.95]' : ''}`}>
         
         <div className="absolute top-[-10%] left-[-10%] w-[50vw] h-[50vw] bg-[#2A0845] opacity-20 rounded-full blur-[100px] pointer-events-none" />
         <div className="absolute bottom-[10%] right-[-10%] w-[60vw] h-[60vw] bg-[#001B3A] opacity-30 rounded-full blur-[120px] pointer-events-none" />
@@ -474,6 +676,109 @@ export default function CreaPage() {
 
         </div>
       </div>
+
+      {/* POP-UP IDENTITA IA (PRIMO VIDEO) */}
+      {showFacePopup && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/80 backdrop-blur-md" />
+          
+          <div className="relative w-full max-w-[340px] bg-[#0A0A0A] border border-white/10 rounded-[32px] p-6 shadow-2xl animate-slideUp flex flex-col items-center">
+            
+            <button 
+              onClick={() => {
+                setShowFacePopup(false);
+                setIsGenerating(false);
+              }}
+              className="absolute top-4 right-4 text-zinc-500 hover:text-white"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="w-12 h-12 bg-purple-500/20 rounded-full flex items-center justify-center mb-4 mt-2">
+              <Sparkles className="w-6 h-6 text-purple-400" />
+            </div>
+
+            <p className="text-sm text-white text-center mb-4 leading-relaxed font-medium">
+              Carica il tuo volto ora. Sarà il tuo pass universale per ogni POV della scuola. Fallo bene una volta.
+            </p>
+            <p className="text-[11px] text-zinc-400 text-center mb-6 leading-relaxed bg-white/5 p-3 rounded-xl border border-white/10">
+              💡 <span className="font-bold text-yellow-400">Regola d'oro:</span> Una foto chiara, da solo e ben illuminata garantisce un Face-Swap da paura. Niente occhiali, niente distrazioni.
+            </p>
+
+            <div className="w-full flex flex-col items-center mb-6">
+              <div className="relative mb-2">
+                <div className={`absolute -inset-2 border-2 rounded-xl pointer-events-none transition-all duration-500 ${
+                  isFaceDetected 
+                    ? 'border-green-500 shadow-[0_0_15px_rgba(34,197,94,0.4)]' 
+                    : 'border-purple-400/30'
+                }`} />
+                
+                <button
+                  type="button"
+                  onClick={handleIaFaceClick}
+                  className="relative w-20 h-28 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center group overflow-hidden"
+                >
+                  {iaFacePreview ? (
+                    <img 
+                      src={iaFacePreview} 
+                      alt="IA Face preview" 
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <div className="flex flex-col items-center justify-center">
+                      <Camera className="w-6 h-6 text-purple-400/50 group-hover:text-purple-400 transition-colors" />
+                    </div>
+                  )}
+                </button>
+              </div>
+              
+              <input
+                ref={iaFaceInputRef}
+                type="file"
+                accept="image/*"
+                capture="user"
+                onChange={handleIaFaceChange}
+                className="hidden"
+              />
+
+              <div className="flex flex-col items-center gap-0.5">
+                <span className={`text-[10px] font-bold tracking-wider ${isFaceDetected ? 'text-green-400 animate-pulse' : 'text-zinc-500'}`}>
+                  {isFaceDetected ? 'VISO RILEVATO' : 'TOCCA PER SCATTARE'}
+                </span>
+                {isFallbackActive && (
+                  <span className="text-[8px] text-orange-400 flex items-center gap-1 mt-1">
+                    <ShieldAlert size={10} /> Qualità bassa, ci proviamo
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {faceError && (
+              <div className="w-full mb-4 p-2 bg-red-500/10 border border-red-500/30 rounded-lg">
+                <p className="text-[10px] text-red-400 text-center font-bold">
+                  {faceError}
+                </p>
+              </div>
+            )}
+
+            <button
+              onClick={handleSaveFaceAndGenerate}
+              disabled={isFaceLoading || !selectedIaFaceFile}
+              className="w-full py-4 bg-purple-600 text-white font-black text-xs uppercase tracking-widest rounded-xl transition-all duration-300 disabled:opacity-50 disabled:bg-zinc-800 disabled:text-zinc-500 active:scale-95 flex items-center justify-center"
+            >
+              {isFaceLoading ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  {faceLoadingMessage}
+                </>
+              ) : (
+                'Continua'
+              )}
+            </button>
+
+          </div>
+        </div>
+      )}
 
       {/* POP-UP INVITO AMICO (BOTTOM SHEET) */}
       {showInvitePopup && (
