@@ -83,6 +83,29 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased bg-black`}
       >
+        {/* PATCH DI RESET GLOBALE PER QR CODE:
+            1. Forza la rimozione dei vecchi Service Worker che bloccano il caricamento su telefoni "vecchi".
+            2. Intercetta gli errori di caricamento chunk (Schermo Bianco) e ricarica l'app pulita.
+        */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              (function() {
+                if ('serviceWorker' in navigator) {
+                  navigator.serviceWorker.getRegistrations().then(function(regs) {
+                    for (var i = 0; i < regs.length; i++) { regs[i].unregister(); }
+                  });
+                }
+                window.addEventListener('error', function(e) {
+                  if (e.message && (e.message.indexOf('Loading chunk') > -1 || e.message.indexOf('Script error') > -1)) {
+                    window.location.reload();
+                  }
+                }, true);
+              })();
+            `,
+          }}
+        />
+
         {/* LOGICA "CALAMITA": 
             Questo script viene eseguito immediatamente al caricamento del browser.
             Controlla se c'è un video in sospeso (pending_production) creato nell'ultima ora.
